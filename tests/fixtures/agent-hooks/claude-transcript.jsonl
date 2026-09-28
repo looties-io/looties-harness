@@ -1,0 +1,8 @@
+{"type":"user","message":{"role":"user","content":"Add a retry to the image upload check and open a pull request against dev when it is green."},"uuid":"u1"}
+{"type":"attachment","attachment":{"type":"hook_additional_context","content":["anchor"],"hookEvent":"UserPromptSubmit"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":""},{"type":"text","text":"**Level L1**: logic change in one script, no L2 trigger."}]},"uuid":"a1"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]},"uuid":"u2"}
+{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /repo/.claude/skills/x"}]},"uuid":"u3"}
+{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>abc</task-id>\n</task-notification>"},"uuid":"u4"}
+{"type":"user","message":{"role":"user","content":"yes"},"uuid":"u5"}
+{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}

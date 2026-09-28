@@ -1,0 +1,14 @@
+{
+  "session_id": "01a0e439-6bd3-7e30-b58e-5f1dfc6cb143",
+  "turn_id": "01a0e439-6c16-7ce0-8ae6-645b4b673740",
+  "transcript_path": "/home/.codex/sessions/2026/09/27/rollout-2026-09-27T20-56-03-01a0e439-6bd3-7e30-b58e-5f1dfc6cb143.jsonl",
+  "cwd": "/repo",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6-astra",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: /repo/note.txt\n@@\n-hello\n+hello world\n*** End Patch"
+  },
+  "tool_use_id": "exec-7123ea2c-e676-48b8-801b-720ffd8ee878"
+}

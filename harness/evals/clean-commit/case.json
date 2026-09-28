@@ -1,0 +1,11 @@
+{
+  "id": "clean-commit",
+  "title": "Clean commit in a fresh worktree",
+  "protects": "A commit goes through the pre-commit hook with explicit staging, and node_modules is linked only when it is missing.",
+  "setup": {
+    "linkNodeModules": false
+  },
+  "timeoutMinutes": 25,
+  "maxTurns": 40,
+  "prompt": "Level L0: a one-line documentation change. You are in a fresh git worktree of this repository. Append the line `- Canary check {nonce}.` at the end of README.md, then commit it on the current branch with a conventional commit message. The commit must pass the repository's pre-commit hook. Do not push, do not open a pull request, and change nothing else."
+}

@@ -1,0 +1,10 @@
+{
+  "session_id": "01a0e439-6bd3-7e30-b58e-5f1dfc6cb143",
+  "turn_id": "01a0e439-6c16-7ce0-8ae6-645b4b673740",
+  "transcript_path": "/home/.codex/sessions/2026/09/27/rollout-2026-09-27T20-56-03-01a0e439-6bd3-7e30-b58e-5f1dfc6cb143.jsonl",
+  "cwd": "/repo",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "gpt-6-astra",
+  "permission_mode": "bypassPermissions",
+  "prompt": "Do these steps, each as a separate tool call: 1) shell: echo PROBE_ASK 2) shell: echo PROBE_DENY 3) shell: echo PROBE_NET 4) use apply_patch to change note.txt content to 'hello world'. Then list any ANCHOR_PROBE tokens in your context."
+}

@@ -1,0 +1,16 @@
+{
+  "$comment": "Copied to .agents/harness.config.json by install.mjs. Every key is optional; see docs/agent-harness.md#configuration. The guard asks before any edit of the installed file.",
+  "branches": { "integration": "dev", "release": "main" },
+  "ci": { "workflow": "ci.yml" },
+  "productionCommands": [
+    { "command": "terraform apply", "effect": "changes production infrastructure" },
+    { "command": "kubectl --context production apply", "effect": "changes the production cluster" },
+    { "command": "npm publish", "effect": "publishes a package to the registry" },
+    { "command": "your-deploy-cli deploy --prod", "effect": "deploys production (replace with your own)" }
+  ],
+  "docsCheck": null,
+  "recordsDirectory": "docs/records",
+  "journalRepository": null,
+  "signalLabels": [],
+  "neverTouch": []
+}

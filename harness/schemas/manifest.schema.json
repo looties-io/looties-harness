@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent harness manifest",
+  "description": "Maps each harness source under .agents/ to its generated per-tool target. Owned by docs/agent-harness.md#sources-and-adapters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "entries"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "description": "Bumped with MANIFEST_VERSION in .agents/check.mjs on any breaking change."
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "source",
+        "targets"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "kind": {
+          "enum": [
+            "rule",
+            "level",
+            "agent",
+            "hook",
+            "instinct",
+            "skill"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^\\.agents/"
+        },
+        "targets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "claude",
+            "codex"
+          ],
+          "properties": {
+            "claude": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^\\.claude/"
+            },
+            "codex": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^\\.codex/"
+            }
+          }
+        },
+        "note": {
+          "type": "string"
+        },
+        "options": {
+          "type": "object",
+          "description": "Hook generation settings, read by .agents/sync-adapters.mjs. Only hook entries take options: one list of hook specs per tool, either key optional. The generator builds each command from `source`.",
+          "additionalProperties": false,
+          "properties": {
+            "claude": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/hookSpec"
+              }
+            },
+            "codex": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/hookSpec"
+              }
+            }
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "targets": {
+            "anyOf": [
+              {
+                "properties": {
+                  "claude": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "codex": {
+                    "type": "null"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "note"
+        ]
+      }
+    },
+    "hookSpec": {
+      "type": "object",
+      "required": [
+        "event"
+      ],
+      "description": "One hook registration: the event, an optional matcher and timeout, plus any extra handler field the tool accepts (such as statusMessage or asyncRewake).",
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "matcher": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,261 @@
+{
+  "$schema": "./schemas/manifest.schema.json",
+  "version": 1,
+  "entries": [
+    {
+      "id": "rules-base",
+      "kind": "rule",
+      "source": ".agents/rules/base.md",
+      "targets": {
+        "claude": ".claude/rules/base.md",
+        "codex": null
+      },
+      "note": "Codex: injected on every prompt by the anchor hook."
+    },
+    {
+      "id": "rules-docs",
+      "kind": "rule",
+      "source": ".agents/rules/docs.md",
+      "targets": {
+        "claude": ".claude/rules/docs.md",
+        "codex": null
+      },
+      "note": "Codex has no path-scoped rules; the AGENTS.md routing table covers it. An example: add one such rule per area that needs pointers."
+    },
+    {
+      "id": "level-l0",
+      "kind": "level",
+      "source": ".agents/levels/L0.md",
+      "targets": {
+        "claude": null,
+        "codex": null
+      },
+      "note": "Both tools: the anchor hook injects the current level at session start, resume and compaction."
+    },
+    {
+      "id": "level-l1",
+      "kind": "level",
+      "source": ".agents/levels/L1.md",
+      "targets": {
+        "claude": null,
+        "codex": null
+      },
+      "note": "Both tools: the anchor hook injects the current level at session start, resume and compaction."
+    },
+    {
+      "id": "level-l2",
+      "kind": "level",
+      "source": ".agents/levels/L2.md",
+      "targets": {
+        "claude": null,
+        "codex": null
+      },
+      "note": "Both tools: the anchor hook injects the current level at session start, resume and compaction."
+    },
+    {
+      "id": "agent-explorer",
+      "kind": "agent",
+      "source": ".agents/agents/explorer.md",
+      "targets": {
+        "claude": ".claude/agents/explorer.md",
+        "codex": ".codex/agents/explorer.toml"
+      }
+    },
+    {
+      "id": "agent-planner",
+      "kind": "agent",
+      "source": ".agents/agents/planner.md",
+      "targets": {
+        "claude": ".claude/agents/planner.md",
+        "codex": ".codex/agents/planner.toml"
+      }
+    },
+    {
+      "id": "agent-implementer",
+      "kind": "agent",
+      "source": ".agents/agents/implementer.md",
+      "targets": {
+        "claude": ".claude/agents/implementer.md",
+        "codex": ".codex/agents/implementer.toml"
+      }
+    },
+    {
+      "id": "agent-reviewer",
+      "kind": "agent",
+      "source": ".agents/agents/reviewer.md",
+      "targets": {
+        "claude": ".claude/agents/reviewer.md",
+        "codex": ".codex/agents/reviewer.toml"
+      }
+    },
+    {
+      "id": "agent-verifier",
+      "kind": "agent",
+      "source": ".agents/agents/verifier.md",
+      "targets": {
+        "claude": ".claude/agents/verifier.md",
+        "codex": ".codex/agents/verifier.toml"
+      }
+    },
+    {
+      "id": "agent-healer",
+      "kind": "agent",
+      "source": ".agents/agents/healer.md",
+      "targets": {
+        "claude": ".claude/agents/healer.md",
+        "codex": null
+      },
+      "note": "The nightly self-healing pass runs Claude Code headless; Codex has no healer run."
+    },
+    {
+      "id": "skills",
+      "kind": "skill",
+      "source": ".agents/skills",
+      "targets": {
+        "claude": ".claude/skills",
+        "codex": null
+      },
+      "note": "Optional: create .agents/skills/<name>/SKILL.md to share skills. Claude: one directory symlink per skill. Codex reads .agents/skills natively."
+    },
+    {
+      "id": "instinct-concurrent-session-commits",
+      "kind": "instinct",
+      "source": ".agents/instincts/concurrent-session-commits.md",
+      "targets": {
+        "claude": null,
+        "codex": null
+      },
+      "note": "Both tools: the anchor hook loads every instinct at session start, resume and compaction."
+    },
+    {
+      "id": "hook-guard",
+      "kind": "hook",
+      "source": ".agents/hooks/guard.mjs",
+      "targets": {
+        "claude": ".claude/settings.json",
+        "codex": ".codex/hooks.json"
+      },
+      "note": "Codex hooks cannot ask: the guard turns every ask into a deny that hands the command to the maintainer.",
+      "options": {
+        "claude": [
+          {
+            "event": "PreToolUse",
+            "matcher": "Bash|Read|Grep|Edit|Write|MultiEdit|NotebookEdit",
+            "timeout": 30
+          }
+        ],
+        "codex": [
+          {
+            "event": "PreToolUse",
+            "timeout": 30
+          }
+        ]
+      }
+    },
+    {
+      "id": "hook-anchor",
+      "kind": "hook",
+      "source": ".agents/hooks/anchor.mjs",
+      "targets": {
+        "claude": ".claude/settings.json",
+        "codex": ".codex/hooks.json"
+      },
+      "note": "Codex has no compaction event with context: its first prompt after a compaction gets the full anchor.",
+      "options": {
+        "claude": [
+          {
+            "event": "SessionStart",
+            "matcher": "startup|resume|clear|compact",
+            "timeout": 10
+          },
+          {
+            "event": "UserPromptSubmit",
+            "timeout": 10
+          }
+        ],
+        "codex": [
+          {
+            "event": "SessionStart",
+            "timeout": 10
+          },
+          {
+            "event": "UserPromptSubmit",
+            "timeout": 10
+          }
+        ]
+      }
+    },
+    {
+      "id": "hook-stop-typecheck",
+      "kind": "hook",
+      "source": ".agents/hooks/stop-typecheck.sh",
+      "targets": {
+        "claude": ".claude/settings.json",
+        "codex": null
+      },
+      "note": "Codex has no asynchronous rewake; a git pre-commit hook that typechecks covers it.",
+      "options": {
+        "claude": [
+          {
+            "event": "Stop",
+            "timeout": 90,
+            "statusMessage": "Typechecking...",
+            "asyncRewake": true,
+            "rewakeSummary": "Typecheck",
+            "rewakeMessage": "npm run typecheck failed after your last changes. Fix the type errors below:"
+          }
+        ]
+      }
+    },
+    {
+      "id": "hook-review-stamp",
+      "kind": "hook",
+      "source": ".agents/hooks/review-stamp.mjs",
+      "targets": {
+        "claude": ".claude/settings.json",
+        "codex": null
+      },
+      "note": "Codex has no SubagentStop event, so it records no approval and the guard denies its direct pushes to the integration branch with a handoff.",
+      "options": {
+        "claude": [
+          {
+            "event": "SubagentStop",
+            "timeout": 10
+          }
+        ]
+      }
+    },
+    {
+      "id": "hook-healing",
+      "kind": "hook",
+      "source": ".agents/hooks/healing.mjs",
+      "targets": {
+        "claude": ".claude/settings.json",
+        "codex": ".codex/hooks.json"
+      },
+      "note": "Codex has no SessionEnd with a transcript: its Stop hook rewrites the same session summary after every turn.",
+      "options": {
+        "claude": [
+          {
+            "event": "UserPromptSubmit",
+            "timeout": 10
+          },
+          {
+            "event": "SessionEnd",
+            "timeout": 30
+          }
+        ],
+        "codex": [
+          {
+            "event": "UserPromptSubmit",
+            "timeout": 10
+          },
+          {
+            "event": "Stop",
+            "timeout": 30
+          }
+        ]
+      }
+    }
+  ]
+}

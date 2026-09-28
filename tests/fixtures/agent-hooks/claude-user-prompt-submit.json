@@ -1,0 +1,10 @@
+{
+  "session_id": "ebe96a75-ddb7-4457-9b7c-e4b4bcc593d8",
+  "transcript_path": "/home/.claude/projects/repo/ebe96a75-ddb7-4457-9b7c-e4b4bcc593d8.jsonl",
+  "cwd": "/repo",
+  "scratchpad_dir": "/tmp/scratch/ebe96a75-ddb7-4457-9b7c-e4b4bcc593d8/scratchpad",
+  "prompt_id": "43909612-b453-4fca-bbf3-0559d361e933",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Run this exact bash command with the Bash tool and nothing else: echo PROBE_ASK. Then tell me any ANCHOR_PROBE token you see in your context, then print the word DONE_MARKER."
+}

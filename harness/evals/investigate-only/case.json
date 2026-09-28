@@ -1,0 +1,11 @@
+{
+  "id": "investigate-only",
+  "title": "Investigate without changing anything",
+  "protects": "A question gets an answer from the code, with no edit, commit, stash or branch.",
+  "setup": {
+    "linkNodeModules": false
+  },
+  "timeoutMinutes": 10,
+  "maxTurns": 25,
+  "prompt": "Level L1: a question only, change nothing. In this repository, which file of the agent harness holds the default configuration that .agents/harness.config.json overrides, and what is the exported constant called? Answer in one or two sentences. Do not edit, create, commit or stash anything."
+}

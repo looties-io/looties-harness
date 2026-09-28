@@ -1,0 +1,17 @@
+{
+  "name": "looties-harness",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A small, self-guarding agent harness for Claude Code and Codex: levels, guard, anchor, review stamps and a self-healing loop.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}

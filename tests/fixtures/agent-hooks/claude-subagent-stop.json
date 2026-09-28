@@ -1,0 +1,15 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000002",
+  "transcript_path": "/home/user/.claude/projects/repo/00000000-0000-4000-8000-000000000002.jsonl",
+  "cwd": "/repo",
+  "prompt_id": "00000000-0000-4000-8000-000000000003",
+  "permission_mode": "bypassPermissions",
+  "agent_id": "aa8f18a2f47e8af39",
+  "agent_type": "reviewer",
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_transcript_path": "/home/user/.claude/projects/repo/00000000-0000-4000-8000-000000000002/subagents/agent-aa8f18a2f47e8af39.jsonl",
+  "last_assistant_message": "Independent review: APPROVE 6faf046df3200f4434ebb71eabc2b3bd653ecdb8\nReviewer session: probe",
+  "background_tasks": [],
+  "session_crons": []
+}

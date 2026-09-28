@@ -1,0 +1,16 @@
+{
+  "session_id": "ebe96a75-ddb7-4457-9b7c-e4b4bcc593d8",
+  "transcript_path": "/home/.claude/projects/repo/ebe96a75-ddb7-4457-9b7c-e4b4bcc593d8.jsonl",
+  "cwd": "/repo",
+  "scratchpad_dir": "/tmp/scratch/ebe96a75-ddb7-4457-9b7c-e4b4bcc593d8/scratchpad",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/repo/eslint.config.js",
+    "old_string": "a",
+    "new_string": "b",
+    "replace_all": false
+  },
+  "tool_use_id": "toolu_01EditProbe"
+}

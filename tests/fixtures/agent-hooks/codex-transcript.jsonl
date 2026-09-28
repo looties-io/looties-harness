@@ -1,0 +1,7 @@
+{"type":"session_meta","payload":{"id":"s1"}}
+{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /repo\n..."}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>\n- Box\n</recommended_plugins>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fix the copy typo on the pricing page footer; it is one word and nothing else changes at all."}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Level L0: one-word copy fix."}]}}
+{"type":"compacted","payload":{"message":"summary"}}

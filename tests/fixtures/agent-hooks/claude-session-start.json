@@ -1,0 +1,9 @@
+{
+  "session_id": "ebe96a75-ddb7-4457-9b7c-e4b4bcc593d8",
+  "transcript_path": "/home/.claude/projects/repo/ebe96a75-ddb7-4457-9b7c-e4b4bcc593d8.jsonl",
+  "cwd": "/repo",
+  "scratchpad_dir": "/tmp/scratch/ebe96a75-ddb7-4457-9b7c-e4b4bcc593d8/scratchpad",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "model": "claude-sonnet-5"
+}

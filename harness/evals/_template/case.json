@@ -1,0 +1,11 @@
+{
+  "id": "my-project-case",
+  "title": "One sentence naming the behaviour this case protects",
+  "protects": "What must keep working when a learned rule is added: the outcome, not the steps.",
+  "setup": {
+    "linkNodeModules": false
+  },
+  "timeoutMinutes": 15,
+  "maxTurns": 30,
+  "prompt": "Level L1: a small, realistic task in this repository, stated as the maintainer would. Create the file canary/{nonce}.txt holding the single line `ok {nonce}`. Do not deploy anything, do not push and do not commit."
+}
