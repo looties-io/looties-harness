@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { DEFAULT_CONFIG, LOOP_ENV, loadConfig } from './config.mjs';
 import { JOURNAL_DIRECTORY, appendRecord, inJournal, journalMuted, journalRoot } from './journal.mjs';
 import { effectiveLevel, isEntrypoint, normalize, readStdin, readTranscript, respondPreToolUse, toolFromArgv, truncate } from './lib.mjs';
-import { basename, parseCommands } from './shell.mjs';
+import { basename, parseCommands, xargsCommand } from './shell.mjs';
 import { STAMP_DIRECTORY, readReview, stampRoot } from './stamps.mjs';
 
 // Guard hook (PreToolUse, Claude and Codex). It enforces the "Never" list and
@@ -58,6 +58,9 @@ const HARNESS_FILES = [
 ];
 // Directories that contain harness files: removing, moving or restoring one reaches them.
 const HARNESS_PARENTS = /(?:^|\/)(?:\.agents(?:\/rules|\/agents)?|\.claude(?:\/agents)?|\.codex(?:\/agents)?|\.git)$/;
+// Names of harness files that may be untracked, and the directories on the
+// way to them.
+const HARNESS_NAMES = ['.agents', '.claude', '.codex', '.git', '.husky', 'hooks', 'agents', 'evals', 'rules', 'learned', 'healing', 'settings.json', 'settings.local.json', 'hooks.json', 'config.toml', 'manifest.json', 'manifest.state.json', 'harness.config.json', 'reviewer.md', 'healer.md', 'reviewer.toml', 'sync-adapters.mjs', 'check.mjs'];
 const HARNESS_MENTION = /\.agents\/(?:hooks|manifest(?:\.state)?\.json|harness\.config\.json|agents\/(?:reviewer|healer)\.md|evals|healing|rules\/learned|sync-adapters\.mjs|check\.mjs)|(?:\.claude|\.codex)\/agents\/(?:reviewer|healer)|\.claude\/settings|\.codex\/(?:hooks\.json|config\.toml)|\.git\/hooks|\.husky/;
 // A write, removal or move whose arguments name a harness file. Only the call
 // counts: code that imports or reads these files, or merely quotes one in a
@@ -145,6 +148,19 @@ export const defaultDeps = {
   },
   review(sha, cwd) {
     return readReview(stampRoot(cwd), sha);
+  },
+  // The names a harness file or directory goes by: every path segment of
+  // the tracked harness files, the git hooks and the fixed names below. A
+  // find whose -name cannot match one of them cannot reach the harness.
+  harnessNames(root) {
+    const names = new Set(HARNESS_NAMES);
+    const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', timeout: 5000, maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }).split('\0').filter(Boolean);
+    for (const file of tracked) {
+      if (HARNESS_FILES.some((pattern) => pattern.test(`/${file}`))) for (const segment of file.split('/')) names.add(segment);
+    }
+    const hooks = join(resolve(root, git(['rev-parse', '--git-common-dir'], root)), 'hooks');
+    for (const entry of readdirSync(hooks)) names.add(entry);
+    return names;
   },
   configGet(key, cwd) {
     try {
@@ -260,15 +276,105 @@ function evaluateBash(command, context) {
     // `cd` changes the directory of the commands after it on the same line.
     if (['cd', 'pushd'].includes(simple.argv[0]) && simple.argv[1] && !simple.argv[1].startsWith('-')) cwd = resolve(cwd, simple.argv[1].replace(/^~(?=\/|$)/, context.deps.env.HOME ?? '~'));
     verdicts.push(evaluateSimple(simple, { ...context, cwd, branchSwitched }));
-    // The nightly admission session pushes one reviewed docs commit; it never merges.
-    if (context.deps.env[LOOP_ENV.nightly] === '1' && basename(simple.argv[0] ?? '') === 'gh' && ((simple.argv[1] === 'pr' && simple.argv[2] === 'merge') || (simple.argv[1] === 'api' && simple.argv.some((token) => /\/merges?\b|mergePullRequest|enablePullRequestAutoMerge/.test(token))))) verdicts.push(verdict('deny', `The nightly admission session pushes its reviewed documentation commit to ${integrationBranch(context)} and never merges a pull request. Standard: docs/agent-harness.md#self-healing-loop`));
+    if (context.deps.env[LOOP_ENV.nightly] === '1') verdicts.push(nightlyGhVerdict(simple.argv, context));
     // Journal paths resolve from the directory this command runs in.
     verdicts.push(journalVerdict([simple], { ...context, cwd, gitEnvironment }));
     // The guard reads the current branch before the line runs, so a later
     // implicit push after a checkout would be judged against the wrong branch.
     if (switchesBranch(simple.argv, { ...context, cwd })) branchSwitched = true;
   }
-  verdicts.push(approvalPostVerdict(commands, command, context), graphqlMergeVerdict(commands, context), stampStoreVerdict(commands));
+  verdicts.push(approvalPostVerdict(commands, command, context), graphqlMergeVerdict(commands, context), stampStoreVerdict(commands), xargsVerdict(commands, context));
+  return worst(verdicts);
+}
+
+// ------------------------------------------------------ nightly admission
+
+// The nightly admission session (HARNESS_NIGHTLY=1) has a reviewer approve
+// its commit and pushes it to the integration branch; the pass's Node process
+// makes every GitHub write itself. So the session reads GitHub and never
+// writes to it, and its pushes may only reach the integration branch
+// (pushVerdict).
+const NIGHTLY_GH_READS = {
+  pr: ['view', 'list', 'diff', 'checks', 'status'],
+  issue: ['view', 'list', 'status'],
+  run: ['view', 'list', 'watch'],
+  workflow: ['view', 'list'],
+  repo: ['view'],
+  release: ['view', 'list'],
+  label: ['list'],
+  auth: ['status'],
+};
+
+function nightlyGhVerdict(argv, context) {
+  if (basename(argv[0] ?? '') !== 'gh') return PASS;
+  const [group, action] = argv.slice(1).filter((token) => !token.startsWith('-'));
+  if (group === 'search' || NIGHTLY_GH_READS[group]?.includes(action)) return PASS;
+  if (group === 'api' && action !== 'graphql' && ghApiMethod(argv) === 'GET') return PASS;
+  return verdict('deny', `The nightly admission session only reads GitHub (gh ${[group, action].filter(Boolean).join(' ')}): it pushes its reviewed documentation commit to ${integrationBranch(context)}, never merges, and the nightly pass writes the issues itself. Standard: docs/agent-harness.md#self-healing-loop`);
+}
+
+// The HTTP method a gh api call uses: its -X, else POST as soon as it sends a field.
+function ghApiMethod(argv) {
+  let method = '';
+  argv.forEach((token, index) => {
+    if (['-X', '--method'].includes(argv[index - 1])) method = token;
+    else if (/^-X./.test(token)) method = token.slice(2);
+    else if (token.startsWith('--method=')) method = token.slice('--method='.length);
+  });
+  if (method) return method.toUpperCase();
+  return argv.some((token) => /^(?:-[fF]|--field|--raw-field|--input)(?:=|$)/.test(token)) ? 'POST' : 'GET';
+}
+
+// ------------------------------------------------------------------- xargs
+
+// xargs runs its command on paths another command of the line prints. When
+// that command writes, removes or runs code, the paths the producers name
+// (the roots of a find, the operands of ls, echo or git ls-files) count as
+// its targets, and so do the lines of its -a file. A producer that names no
+// path, such as git diff --name-only, is not seen; the review of the diff is
+// the net there.
+// A command that changes the files it is given: removers, writers, copiers,
+// mode changers, in-place editors and interpreters.
+function changesItsOperands(argv) {
+  const head = basename(argv[0] ?? '');
+  return REMOVERS.has(head) || WRITERS.has(head) || COPIERS.has(head) || MODE_CHANGERS.has(head) || INTERPRETERS.has(head) || ['dash', 'ksh', 'fish'].includes(head) || inPlaceWrite(argv);
+}
+
+function producedPaths(argv, context) {
+  const head = basename(argv[0] ?? '');
+  const operands = argv.slice(1).filter((token) => token && !token.startsWith('-'));
+  if (head === 'find') {
+    const roots = findRoots(argv);
+    return findNameExempt(argv, context) ? [] : (roots.length ? roots : ['.']);
+  }
+  if (head === 'ls') return operands.length ? operands : ['.'];
+  return operands;
+}
+
+function xargsVerdict(commands, context) {
+  const verdicts = [];
+  for (const run of commands.filter(({ argv }) => basename(argv[0] ?? '') === 'xargs')) {
+    const { inner, argFile } = xargsCommand(run.argv);
+    if (inner.length === 0 || !changesItsOperands(inner)) continue;
+    const what = `xargs ${basename(inner[0])}`;
+    // A copy or move gets its sources from the input: `xargs cp -t .claude`
+    // writes into its destination whatever the producers print.
+    if (COPIERS.has(basename(inner[0])) || basename(inner[0]) === 'mv') {
+      const withInput = inner.some((token) => token.includes('{}')) ? inner : [...inner, '{}'];
+      verdicts.push(...copyTargets(withInput, context, true).map(({ path, whole }) => harnessVerdict(path, context, what, whole)));
+      // A copy leaves its sources as they were.
+      if (COPIERS.has(basename(inner[0]))) continue;
+    }
+    // The parser lists the command xargs runs right after it; it is judged on its own.
+    const ownCommand = inner.join('\0');
+    const paths = commands.filter((other) => other !== run && other.argv.join('\0') !== ownCommand).flatMap(({ argv }) => producedPaths(argv, context));
+    if (argFile) paths.push(...(readText(context, argFile) ?? '').split('\n').map((line) => line.trim()).filter(Boolean));
+    for (const path of paths) {
+      verdicts.push(harnessVerdict(path, context, what, true));
+      if (inStampStore(path)) verdicts.push(stampWrite(what));
+      if (touchesJournal(path, context) || containsJournal(path, context)) verdicts.push(journalWrite(what));
+    }
+  }
   return worst(verdicts);
 }
 
@@ -449,7 +555,10 @@ function evaluateSimple(simple, context) {
   const { argv } = simple;
   if (argv.length === 0) return fileWriteVerdict({ ...simple, argv: [''] }, context);
   const head = basename(argv[0]);
-  const verdicts = [envReadVerdict(simple, context), fileWriteVerdict(simple, context), inlineCodeVerdict(simple, context)];
+  // A command find runs on what it selects is read with `{}` in place of the
+  // start paths when find's -name cannot select a harness file.
+  const writes = simple.found && findNameExempt(simple.found.find, context) ? simple.found.literal : simple;
+  const verdicts = [envReadVerdict(simple, context), foundEnvVerdict(simple), fileWriteVerdict(writes, context), inlineCodeVerdict(simple, context)];
   if (head === 'git') verdicts.push(gitVerdict(simple, context));
   if (head === 'gh') verdicts.push(ghVerdict(simple, context));
   verdicts.push(productionVerdict(simple, context));
@@ -482,6 +591,15 @@ function envFileVerdict(path, action) {
 
 function envDeny(name, action) {
   return verdict('deny', `Never ${action} ${name}: .env files hold secrets. Load a key into one command's environment instead (for example node --env-file-if-exists=.env.local ...). Standard: docs/agent-harness.md#external-action-boundaries`);
+}
+
+// `find . -name .env.local -exec cat {} \;` prints what find selects: the
+// parser reads `{}` as the start path, so the -name test names the file.
+function foundEnvVerdict(simple) {
+  if (!simple.found || !PRINTERS.has(basename(simple.argv[0] ?? ''))) return PASS;
+  const { find } = simple.found;
+  const hit = find.find((token, index) => ['-name', '-iname'].includes(find[index - 1]) && (isEnvFile(token) || globMatchesEnv(token, { shell: false })));
+  return hit ? envDeny(hit, 'read or print') : PASS;
 }
 
 // The Grep tool's `glob` filter, such as `.env*` or `*.{env,local}`.
@@ -556,19 +674,35 @@ function copyTargets(argv, context, foundPaths = false) {
   let asFile = false;
   let recursive = false;
   let options = true;
+  // Short options that take a value, attached (`-tdir`, `-rt dir`) or next.
+  const valued = basename(argv[0]) === 'install' ? 'tSmog' : 'tS';
   for (let index = 1; index < argv.length; index += 1) {
     const token = argv[index];
     if (options && token === '--') { options = false; continue; }
-    if (options && (token === '-t' || token === '--target-directory')) {
+    if (options && token === '--target-directory') {
       destination = argv[++index];
       targetDirectory = true;
-    } else if (options && (token.startsWith('--target-directory=') || /^-t.+/.test(token))) {
-      destination = token.startsWith('--') ? token.slice(token.indexOf('=') + 1) : token.slice(2);
+    } else if (options && token.startsWith('--target-directory=')) {
+      destination = token.slice(token.indexOf('=') + 1);
       targetDirectory = true;
-    } else if (options && token.startsWith('-')) {
-      if (token === '--no-target-directory' || /^-[^-]*T/.test(token)) asFile = true;
-      if (['--recursive', '--archive'].includes(token) || /^-[^-]*[rRa]/.test(token)) recursive = true;
-      if (['-m', '-o', '-g', '-S', '--mode', '--owner', '--group', '--suffix'].includes(token)) index += 1;
+    } else if (options && token.startsWith('--')) {
+      if (token === '--no-target-directory') asFile = true;
+      if (['--recursive', '--archive'].includes(token)) recursive = true;
+      if (['--mode', '--owner', '--group', '--suffix'].includes(token)) index += 1;
+    } else if (options && token.startsWith('-') && token.length > 1) {
+      for (let position = 1; position < token.length; position += 1) {
+        const letter = token[position];
+        if (valued.includes(letter)) {
+          const value = token.slice(position + 1) || argv[++index];
+          if (letter === 't') {
+            destination = value;
+            targetDirectory = true;
+          }
+          break;
+        }
+        if (letter === 'T') asFile = true;
+        if ('rRa'.includes(letter)) recursive = true;
+      }
     } else operands.push(token);
   }
   if (!targetDirectory) destination = operands.pop();
@@ -588,13 +722,74 @@ function copyTargets(argv, context, foundPaths = false) {
 const FIND_ACTIONS = new Set(['-exec', '-execdir', '-ok', '-okdir']);
 const inPlaceWrite = (argv) => ['sed', 'gsed', 'perl'].includes(basename(argv[0])) && argv.some((token) => /^-[a-zA-Z]*i/.test(token) || token.startsWith('--in-place'));
 
+const firstFindExpression = (argv) => argv.findIndex((token, index) => index > 0 && (token.startsWith('-') || token === '(' || token === '!'));
+
+function findRoots(argv) {
+  const first = firstFindExpression(argv);
+  return argv.slice(1, first === -1 ? argv.length : first);
+}
+
+// find's -name glob as a regular expression: `*` and `?` match a leading dot.
+function nameGlob(pattern, ignoreCase) {
+  let source = '';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === '*') source += '.*';
+    else if (char === '?') source += '.';
+    else if (char === '\\' && index + 1 < pattern.length) source += pattern[++index].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    else if (char === '[') {
+      const end = pattern.indexOf(']', index + 2);
+      if (end === -1) source += '\\[';
+      else {
+        source += `[${pattern.slice(index + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`;
+        index = end;
+      }
+    } else source += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${source}$`, ignoreCase ? 'i' : '');
+}
+
+// True when every file this find selects has a name that no harness file or
+// directory has: a plain conjunction (no -o, !, -not, comma or parentheses)
+// holding a -name or -iname test that matches none of those names, placed
+// before any action. `find . -name .DS_Store -delete` passes this way.
+function findNameExempt(argv, context) {
+  const first = firstFindExpression(argv);
+  if (first === -1) return false;
+  const expression = argv.slice(first);
+  if (expression.some((token) => ['-o', '-or', '!', '-not', ',', '(', ')'].includes(token))) return false;
+  const firstAction = expression.findIndex((token) => token === '-delete' || FIND_ACTIONS.has(token) || /^-f?print/.test(token) || token === '-fls');
+  const tests = [];
+  expression.forEach((token, index) => {
+    if ((token === '-name' || token === '-iname') && (firstAction === -1 || index < firstAction) && expression[index + 1] !== undefined) tests.push(nameGlob(expression[index + 1], token === '-iname'));
+  });
+  if (tests.length === 0) return false;
+  let names;
+  try {
+    names = [...(context.deps.harnessNames?.(context.root) ?? [])];
+  } catch {
+    return false;
+  }
+  if (names.length === 0) return false;
+  return tests.some((test) => !names.some((name) => test.test(name)));
+}
+
+// An -exec action that only acts on the found file: every operand after the
+// command names {}.
+function actsOnFoundOnly(command) {
+  return command.slice(1).filter((token) => !token.startsWith('-')).every((token) => token.includes('{}'));
+}
+
 // find writes through -fprint* and changes its starting points through
 // -delete or an -exec action that writes, removes or runs a program.
 function findTargets(argv, context) {
   const targets = [];
   let destructive = false;
-  const firstExpression = argv.findIndex((token, index) => index > 0 && (token.startsWith('-') || token === '(' || token === '!'));
-  const roots = argv.slice(1, firstExpression === -1 ? argv.length : firstExpression);
+  // The roots stay whole targets unless every action touches only the found
+  // files and their names cannot be a harness name.
+  let foundOnly = true;
+  const firstExpression = firstFindExpression(argv);
+  const roots = findRoots(argv);
   for (let index = firstExpression; index > 0 && index < argv.length; index += 1) {
     const token = argv[index];
     if (token === '-delete') destructive = true;
@@ -609,14 +804,16 @@ function findTargets(argv, context) {
       for (const { argv: command } of commands) {
         if (COPIERS.has(basename(command[0])) || basename(command[0]) === 'mv') targets.push(...copyTargets(command, context, true));
       }
-      destructive ||= commands.some(({ argv: command }) => {
-        const head = basename(command[0]);
-        return REMOVERS.has(head) || WRITERS.has(head) || COPIERS.has(head) || MODE_CHANGERS.has(head) || INTERPRETERS.has(head) || ['dash', 'ksh', 'fish'].includes(head) || inPlaceWrite(command);
-      });
+      for (const { argv: command } of commands) {
+        if (!changesItsOperands(command)) continue;
+        destructive = true;
+        // Copies and moves are judged on their own targets above.
+        if (!COPIERS.has(basename(command[0])) && basename(command[0]) !== 'mv' && !actsOnFoundOnly(command)) foundOnly = false;
+      }
       index = end < 0 ? argv.length : end;
     }
   }
-  if (destructive) targets.push(...(roots.length ? roots : ['.']).map((path) => ({ path, whole: true })));
+  if (destructive && !(foundOnly && findNameExempt(argv, context))) targets.push(...(roots.length ? roots : ['.']).map((path) => ({ path, whole: true })));
   return targets;
 }
 
@@ -629,10 +826,84 @@ function writeTargets({ argv, redirects }, context) {
   const inPlace = inPlaceWrite(argv);
   if (head === 'mv' || COPIERS.has(head)) targets.push(...copyTargets(argv, context));
   else if (head === 'find') targets.push(...findTargets(argv, context));
+  else if (head === 'rsync' || head === 'ditto') targets.push(...syncTargets(argv));
+  else if (['tar', 'gtar', 'bsdtar', 'unzip'].includes(head)) targets.push(...archiveTargets(argv));
   else if (REMOVERS.has(head) || MODE_CHANGERS.has(head)) targets.push(...operands.map((path) => ({ path, whole: true })));
   else if (head === 'dd') targets.push(...operands.filter((token) => token.startsWith('of=')).map((token) => ({ path: token.slice(3) })));
   else if (WRITERS.has(head) || inPlace) targets.push(...operands.map((path) => ({ path })));
   return targets;
+}
+
+// rsync and ditto write the whole tree under their last operand; with
+// --remove-source-files, rsync removes its sources too.
+const RSYNC_WITH_VALUE = new Set(['-e', '-f', '-T', '-B', '-M', '--rsh', '--filter', '--exclude', '--include', '--exclude-from', '--include-from', '--files-from', '--temp-dir', '--partial-dir', '--backup-dir', '--suffix', '--chmod', '--chown', '--log-file', '--log-file-format', '--password-file', '--link-dest', '--compare-dest', '--copy-dest', '--rsync-path', '--out-format', '--timeout', '--contimeout', '--bwlimit', '--max-size', '--min-size', '--max-delete', '--modify-window', '--port', '--sockopts', '--remote-option', '--usermap', '--groupmap', '--iconv', '--info', '--debug', '--block-size', '--skip-compress', '--compress-level', '--arch', '--bom']);
+
+function syncTargets(argv) {
+  const operands = [];
+  for (let index = 1; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (RSYNC_WITH_VALUE.has(token)) index += 1;
+    else if (/^-[a-zA-Z]+$/.test(token) && /[efTBM]$/.test(token) && basename(argv[0]) === 'rsync') index += 1;
+    else if (!token.startsWith('-')) operands.push(token);
+  }
+  if (operands.length < 2) return [];
+  const destination = operands.pop();
+  const sources = argv.includes('--remove-source-files') ? operands : [];
+  return [destination, ...sources].map((path) => ({ path, whole: true }));
+}
+
+// Extracting an archive writes whatever paths it holds under the extraction
+// directory (tar -C or --directory, unzip -d, else the current directory),
+// so that directory counts whole. Creating one writes its -f file.
+function archiveTargets(argv) {
+  const head = basename(argv[0]);
+  const args = argv.slice(1);
+  if (head === 'unzip') {
+    if (args.some((token) => /^-[a-zA-Z]*[lptvzZ]/.test(token))) return [];
+    const flag = args.indexOf('-d');
+    const attached = args.find((token) => /^-d./.test(token));
+    return [{ path: flag !== -1 ? args[flag + 1] ?? '.' : (attached ? attached.slice(2) : '.'), whole: true }];
+  }
+  // Old-style bundles (`tar xzf a.tgz -C out`) take their values in order.
+  const valued = 'bCfFgHIKLNTVX';
+  let mode = '';
+  let archive = null;
+  const directories = [];
+  const take = (letter, value) => {
+    if (letter === 'C') directories.push(value);
+    if (letter === 'f') archive = value;
+  };
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (index === 0 && /^[a-zA-Z]+$/.test(token)) {
+      for (const letter of token) {
+        if ('xctru'.includes(letter)) mode ||= letter;
+        if (valued.includes(letter)) take(letter, args[++index]);
+      }
+      continue;
+    }
+    if (token.startsWith('--')) {
+      const [name, value] = token.includes('=') ? [token.slice(0, token.indexOf('=')), token.slice(token.indexOf('=') + 1)] : [token, undefined];
+      if (['--extract', '--get'].includes(name)) mode ||= 'x';
+      if (['--create', '--append', '--update'].includes(name)) mode ||= 'c';
+      if (name === '--directory') directories.push(value ?? args[++index]);
+      if (name === '--file') archive = value ?? args[++index];
+      continue;
+    }
+    if (/^-[a-zA-Z]+/.test(token)) {
+      for (let position = 1; position < token.length; position += 1) {
+        const letter = token[position];
+        if ('xctru'.includes(letter)) mode ||= letter;
+        if (valued.includes(letter)) {
+          take(letter, token.slice(position + 1) || args[++index]);
+          break;
+        }
+      }
+    }
+  }
+  if (mode === 'x') return (directories.length ? directories : ['.']).map((path) => ({ path, whole: true }));
+  if ('cru'.includes(mode) && mode && archive && archive !== '-') return [{ path: archive }];
+  return [];
 }
 
 function fileWriteVerdict(simple, context) {
@@ -894,6 +1165,11 @@ function pushVerdict(args, context) {
     if (context.branchSwitched) verdicts.push(verdict('deny', 'This push has no explicit destination and follows a branch switch on the same line, so the guard cannot tell where it lands. Push in a separate command, naming the branch: git push origin <branch>. Standard: docs/agent-harness.md#direct-push-to-the-integration-branch'));
     else if (implicit && context.deps.configGet(`remote.${remote}.push`, context.cwd)) verdicts.push(verdict('ask', `remote.${remote}.push is configured, so this push may not land on the current branch. Name the destination (git push ${remote} <branch>), or confirm. Standard: docs/agent-harness.md#direct-push-to-the-integration-branch`));
   }
+  // The nightly admission session pushes its admission commit to the integration branch and nowhere else.
+  if (context.deps.env[LOOP_ENV.nightly] === '1') {
+    const elsewhere = updates.find(({ destination }) => destination !== integration);
+    if (elsewhere) verdicts.push(verdict('deny', `The nightly admission session pushes only its admission commit to ${integration}, not to ${elsewhere.destination || 'an unnamed branch'}. Standard: docs/agent-harness.md#self-healing-loop`));
+  }
   const protectedUpdates = updates.filter(({ destination }) => branches.has(destination));
   if (protectedUpdates.length === 0) return worst(verdicts);
   const names = [...new Set(protectedUpdates.map(({ destination }) => destination))].join(' and ');
@@ -1138,16 +1414,9 @@ function ghVerdict({ argv }, context) {
   if (argv[1] === 'pr' && argv[2] === 'merge') return mergeVerdict(argv.slice(3), context);
   if (argv[1] === 'issue' && ISSUE_STATE_CHANGES.has(argv[2])) return issueDecisionVerdict(argv, context);
   if (argv[1] === 'api') {
-    let method = '';
-    argv.forEach((token, index) => {
-      if (['-X', '--method'].includes(argv[index - 1])) method = token;
-      else if (/^-X./.test(token)) method = token.slice(2);
-      else if (token.startsWith('--method=')) method = token.slice('--method='.length);
-    });
-    if (argv.some((token) => /pulls\/\d+\/merge\b/.test(token)) && method.toUpperCase() === 'PUT') return verdict('ask', API_MERGE_ASK);
-    // Without -X, gh api posts as soon as it sends a field.
-    const sendsFields = argv.some((token) => /^(?:-[fF]|--field|--raw-field|--input)(?:=|$)/.test(token));
-    const writes = method ? method.toUpperCase() !== 'GET' : sendsFields;
+    const method = ghApiMethod(argv);
+    if (argv.some((token) => /pulls\/\d+\/merge\b/.test(token)) && method === 'PUT') return verdict('ask', API_MERGE_ASK);
+    const writes = method !== 'GET';
     if (writes && argv.some((token) => /(?:^|\/)(?:git\/refs|merges|contents)(?:\/|$)/.test(token))) {
       return verdict('ask', 'This gh api call writes a branch, a merge or a file on GitHub directly, around the guard\'s push and merge checks. Push or merge through git and gh pr, or confirm this call. Standard: docs/agent-harness.md#direct-push-to-the-integration-branch');
     }

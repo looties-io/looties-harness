@@ -168,6 +168,9 @@ function admit() {
     // A blocked admission is a failure of the pass, not a quiet outcome.
     if (!landed) throw new Error(`admission ${sha.slice(0, 12)} not pushed: ${session.stdout.trim().split('\n').slice(-3).join(' ')}`);
     for (const name of plan.decidedRules) decidedTonight.add(name);
+    // Tonight's drafting and canaries read the learned rules from this checkout.
+    const checkout = advanceCheckout(sha);
+    log(`admission: ${checkout}`);
     // The journal first: if labelling the issues fails part-way, a candidate
     // already marked applied is not admitted a second time.
     for (const [candidate, status, note] of plan.statusChanges) setStatus(candidate, status, note ? { note } : {});
@@ -178,6 +181,23 @@ function admit() {
     spawnSync('git', ['worktree', 'remove', '--force', worktree], { cwd: repoRoot });
     spawnSync('git', ['branch', '-D', branch], { cwd: repoRoot });
   }
+}
+
+/**
+ * Moves the pass's own checkout to the admitted commit, so the drafting run
+ * and the canaries of the same night see the rules admitted tonight. Only a
+ * detached, clean checkout that the commit fast-forwards moves: the dedicated
+ * nightly worktree, never a checkout someone works in. The admission commit
+ * only adds documentation, so the code already loaded stays valid.
+ */
+export function advanceCheckout(sha, { cwd = repoRoot } = {}) {
+  const git = (args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (git(['symbolic-ref', '-q', 'HEAD']).status === 0) return 'checkout on a branch, left as is';
+  const status = git(['status', '--porcelain', '--untracked-files=no']);
+  if (status.status !== 0 || status.stdout.trim()) return 'checkout has local changes, left as is';
+  if (git(['merge-base', '--is-ancestor', 'HEAD', sha]).status !== 0) return `${sha.slice(0, 12)} does not fast-forward the checkout, left as is`;
+  if (git(['checkout', '--quiet', '--detach', sha]).status !== 0) return `checkout of ${sha.slice(0, 12)} failed, left as is`;
+  return `checkout moved to ${sha.slice(0, 12)}`;
 }
 
 /** Admission persists the handoff; each pass retries until its URL is saved. */

@@ -15,7 +15,7 @@ import { LOCAL_ONLY, initJournal, journalRepository, originIs, syncJournal } fro
 import { effectiveRecords, formatReport, ledgerReport } from '../harness/healing/ledger.mjs';
 import { LIMITS, NEVER_TOUCH, isoWeek, neverTouchPaths, slug } from '../harness/healing/lib.mjs';
 import { checkLearnedRules, forbiddenPathReasons, hiddenTextReasons, learnedRuleFiles, looseningReasons, similarity, sizeReasons } from '../harness/healing/lint.mjs';
-import { admissionPrompt, digestMarkdown, draftingPrompt, ensureWorkIssues, healerCandidates, publishable, rulesToReview } from '../harness/healing/nightly.mjs';
+import { admissionPrompt, advanceCheckout, digestMarkdown, draftingPrompt, ensureWorkIssues, healerCandidates, publishable, rulesToReview } from '../harness/healing/nightly.mjs';
 import { applyPlan, planDecisions, recordPath } from '../harness/healing/review.mjs';
 import { forbiddenCommandFailures } from '../harness/evals/lib.mjs';
 import { checkAgentHarness } from '../harness/check.mjs';
@@ -704,9 +704,11 @@ describe('nightly pass', () => {
     const calls = [];
     const run = (args) => {
       calls.push(args);
-      if (args[1] === 'list') {
-        expect(args).toEqual(expect.arrayContaining(['--state', 'all', '--json', 'url,body']));
-        return JSON.stringify(issues);
+      if (args[0] === 'api') {
+        // The REST list, not the search index, which can lag behind a creation.
+        expect(args[2]).toMatch(/^repos\/\{owner\}\/\{repo\}\/issues\?state=all&per_page=100&labels=self-healing%3Aapplied%2Cagent-task$/);
+        expect(args).toContain('--paginate');
+        return issues.map((issue) => JSON.stringify(issue)).join('\n');
       }
       expect(args.slice(0, 2)).toEqual(['issue', 'create']);
       const issue = { url: `https://github.com/example/app/issues/${100 + issues.length}`, body: args[args.indexOf('--body') + 1] };
@@ -768,11 +770,11 @@ describe('nightly pass', () => {
   it('does not create an issue when the lookup fails', () => {
     const calls = [];
     expect(() => ensureWorkIssues([workCandidate('lookup')], {
-      run: (args) => { calls.push(args); throw new Error('search failed'); },
+      run: (args) => { calls.push(args); throw new Error('lookup failed'); },
       save: () => { throw new Error('must not save'); },
-    })).toThrow('search failed');
+    })).toThrow('lookup failed');
     expect(calls).toHaveLength(1);
-    expect(calls[0][1]).toBe('list');
+    expect(calls[0][0]).toBe('api');
   });
 
   it('asks the admission session for a reviewed, literal docs-only push at L0 and nothing else', () => {
@@ -1025,5 +1027,48 @@ describe('canary checks', () => {
     expect(await check({ worktree, baseSha, commands: ['mkdir canary'], nonce: 'n2' })).toEqual({ pass: true, failures: [] });
     const failed = await check({ worktree, baseSha, commands: ['my-deploy-cli up', 'git push'], nonce: 'n3' });
     expect(failed.failures).toEqual(expect.arrayContaining([expect.stringMatching(/ran the deploy CLI/), expect.stringMatching(/^pushed/), expect.stringMatching(/canary\/n3\.txt is missing/), expect.stringMatching(/outside the task: canary\/n2\.txt/)]));
+  });
+});
+
+describe('the pass sees the rules it admitted the same night', () => {
+  function repository() {
+    const root = mkdtempSync(path.join(tmpdir(), 'nightly-checkout-'));
+    const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'Test');
+    git('config', 'commit.gpgsign', 'false');
+    writeFileSync(path.join(root, 'a.md'), 'a\n');
+    git('add', 'a.md');
+    git('commit', '-q', '-m', 'base');
+    const base = git('rev-parse', 'HEAD');
+    mkdirSync(path.join(root, '.agents', 'rules', 'learned'), { recursive: true });
+    writeFileSync(path.join(root, '.agents', 'rules', 'learned', 'rule.md'), 'rule\n');
+    git('add', '.agents/rules/learned/rule.md');
+    git('commit', '-q', '-m', 'admission');
+    const admitted = git('rev-parse', 'HEAD');
+    return { root, git, base, admitted };
+  }
+
+  it('moves the detached nightly checkout to the admitted commit', () => {
+    const { root, git, base, admitted } = repository();
+    git('checkout', '-q', '--detach', base);
+    expect(advanceCheckout(admitted, { cwd: root })).toMatch(/^checkout moved to /);
+    expect(git('rev-parse', 'HEAD')).toBe(admitted);
+    expect(existsSync(path.join(root, '.agents', 'rules', 'learned', 'rule.md'))).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('leaves a branch checkout, local changes and a non fast-forward alone', () => {
+    const { root, git, base, admitted } = repository();
+    expect(advanceCheckout(base, { cwd: root })).toMatch(/on a branch/);
+    git('checkout', '-q', '--detach', base);
+    writeFileSync(path.join(root, 'a.md'), 'changed\n');
+    expect(advanceCheckout(admitted, { cwd: root })).toMatch(/local changes/);
+    git('checkout', '-q', '--', 'a.md');
+    git('checkout', '-q', '--detach', admitted);
+    expect(advanceCheckout(base, { cwd: root })).toMatch(/does not fast-forward/);
+    expect(git('rev-parse', 'HEAD')).toBe(admitted);
+    rmSync(root, { recursive: true, force: true });
   });
 });

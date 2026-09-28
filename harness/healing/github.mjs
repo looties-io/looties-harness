@@ -196,9 +196,17 @@ export function workIssue(candidate, decision) {
 
 export const workMarker = (id) => `<!-- self-healing-work: ${id} -->`;
 
-/** Recover a handoff even if its work issue has already been closed. */
+/**
+ * Recover a handoff even if its work issue has already been closed. The REST
+ * issue list reads GitHub's database, where an issue exists as soon as it is
+ * created; the search index (and `gh issue list`, which uses it once a label
+ * or a query filters it) can lag, and a lagging lookup would open a second
+ * work issue after a failed save.
+ */
 export function findWorkIssue(id, run = gh) {
-  const issues = JSON.parse(run(['issue', 'list', '--state', 'all', '--search', `"self-healing-work: ${id}" in:body`, '--limit', '100', '--json', 'url,body']));
+  const labels = encodeURIComponent(`${ISSUE_LABELS.applied},agent-task`);
+  const lines = run(['api', '--paginate', `repos/{owner}/{repo}/issues?state=all&per_page=100&labels=${labels}`, '--jq', '.[] | select(.pull_request == null) | {url: .html_url, body}']);
+  const issues = String(lines).split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line));
   return issues.find((issue) => normalized(issue.body).split('\n').at(-1) === workMarker(id));
 }
 

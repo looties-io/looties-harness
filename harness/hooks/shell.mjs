@@ -314,7 +314,14 @@ function unwrap(command, depth) {
       if (!FIND_EXEC.has(token)) return;
       const stop = argv.findIndex((candidate, after) => after > position && (candidate === ';' || candidate === '+'));
       const template = argv.slice(position + 1, stop === -1 ? argv.length : stop);
-      for (const start of starts) executed.push(...unwrap({ ...command, argv: template.flatMap((part) => (part === '{}' ? [start] : [part.split('{}').join(start)])) }, depth));
+      for (const start of starts) {
+        const run = unwrap({ ...command, argv: template.flatMap((part) => (part === '{}' ? [start] : [part.split('{}').join(start)])) }, depth);
+        // The same commands with `{}` kept, for a find whose -name the guard
+        // proves cannot select a harness file.
+        const literal = unwrap({ ...command, argv: template }, depth);
+        if (literal.length === run.length) run.forEach((simple, index) => { simple.found = { find: argv, literal: literal[index] }; });
+        executed.push(...run);
+      }
     });
     return [command, ...executed];
   }
@@ -330,11 +337,34 @@ function unwrap(command, depth) {
   }
   if (head === 'eval') return [command, ...parseCommands(argv.slice(1).join(' '), depth + 1)];
   if (head === 'xargs') {
-    let index = 1;
-    while (index < argv.length && argv[index].startsWith('-')) index += ['-I', '-n', '-P', '-L', '-d', '-E'].includes(argv[index]) ? 2 : 1;
-    if (index < argv.length) return [command, ...unwrap({ ...command, argv: argv.slice(index) }, depth)];
+    const { inner } = xargsCommand(argv);
+    if (inner.length > 0) return [command, ...unwrap({ ...command, argv: inner }, depth)];
   }
   return [command];
+}
+
+const XARGS_WITH_VALUE = new Set(['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s', '--arg-file', '--delimiter', '--max-args', '--max-procs', '--max-chars', '--max-lines', '--process-slot-var']);
+
+/** The command xargs runs, and the file it reads its arguments from (-a). */
+export function xargsCommand(argv) {
+  let index = 1;
+  let argFile = null;
+  while (index < argv.length && argv[index].startsWith('-')) {
+    const token = argv[index];
+    if (token === '--') {
+      index += 1;
+      break;
+    }
+    if (XARGS_WITH_VALUE.has(token)) {
+      if (token === '-a' || token === '--arg-file') argFile = argv[index + 1] ?? null;
+      index += 2;
+      continue;
+    }
+    if (token.startsWith('--arg-file=')) argFile = token.slice('--arg-file='.length);
+    else if (/^-a./.test(token)) argFile = token.slice(2);
+    index += 1;
+  }
+  return { inner: argv.slice(index), argFile };
 }
 
 export function basename(path) {

@@ -94,8 +94,10 @@ describe('sync-adapters', () => {
     write(root);
     const settings = JSON.parse(read(root, '.claude/settings.json'));
     expect(settings.permissions.allow).toEqual(['Bash(gh pr create:*)']);
-    expect(settings.hooks).toEqual({ PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR/.agents/hooks/guard.mjs" --tool claude', timeout: 30 }] }] });
-    expect(JSON.parse(read(root, '.codex/hooks.json')).hooks.PreToolUse[0].hooks[0].command).toBe('f="$(git rev-parse --show-toplevel)/.agents/hooks/guard.mjs"; [ -f "$f" ] || exit 0; node "$f" --tool codex');
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
+    expect(settings.hooks.PreToolUse[0]).toMatchObject({ matcher: 'Bash', hooks: [{ type: 'command', timeout: 30 }] });
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toMatch(/^f="\$CLAUDE_PROJECT_DIR\/\.agents\/hooks\/guard\.mjs"; \[ -f "\$f" \] \|\| \{ printf .*"permissionDecision":"deny".*; exit 0; \}; node "\$f" --tool claude$/);
+    expect(JSON.parse(read(root, '.codex/hooks.json')).hooks.PreToolUse[0].hooks[0].command).toMatch(/^r="\$\(git rev-parse --show-toplevel\)"; f="\$r\/\.agents\/hooks\/guard\.mjs"; if \[ ! -f "\$f" \]; then grep -qF '"\.agents\/hooks\/guard\.mjs"' "\$r\/\.agents\/manifest\.json" 2>\/dev\/null \|\| exit 0; printf .*; exit 0; fi; node "\$f" --tool codex$/);
     expect(read(root, '.codex/config.toml')).toMatch(/sandbox_mode = "workspace-write"\napproval_policy = "on-request"/);
   });
 
@@ -218,5 +220,46 @@ describe('.claude/skills symlinks', () => {
     expect(write(root)).toEqual([]);
     expect(check(root)).toEqual([]);
     expect(existsSync(path.join(root, '.claude/skills/own/SKILL.md'))).toBe(true);
+  });
+});
+
+describe('generated hook commands when the script is missing', () => {
+  // Runs a generated command in a scratch checkout, the way Claude or Codex does.
+  function runHook(command, { declared, present }) {
+    const root = mkdtempSync(path.join(tmpdir(), 'hook-missing-'));
+    execFileSync('git', ['init', '-q'], { cwd: root });
+    mkdirSync(path.join(root, '.agents', 'hooks'), { recursive: true });
+    if (declared) writeFileSync(path.join(root, '.agents', 'manifest.json'), JSON.stringify({ entries: [{ source: '.agents/hooks/guard.mjs' }] }));
+    if (present) writeFileSync(path.join(root, '.agents', 'hooks', 'guard.mjs'), "process.stdout.write('ran');\n");
+    try {
+      return execFileSync('bash', ['-c', command], { cwd: root, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: root }, input: '{}' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  function commands() {
+    const root = harness();
+    write(root);
+    return {
+      claude: JSON.parse(read(root, '.claude/settings.json')).hooks.PreToolUse[0].hooks[0].command,
+      codex: JSON.parse(read(root, '.codex/hooks.json')).hooks.PreToolUse[0].hooks[0].command,
+    };
+  }
+
+  it('refuses the tool call when the guard is missing from a checkout that declares it', () => {
+    const { claude, codex } = commands();
+    for (const command of [claude, codex]) {
+      const output = JSON.parse(runHook(command, { declared: true, present: false }));
+      expect(output.hookSpecificOutput).toMatchObject({ hookEventName: 'PreToolUse', permissionDecision: 'deny' });
+      expect(output.hookSpecificOutput.permissionDecisionReason).toMatch(/guard .*guard\.mjs is missing/);
+    }
+  });
+
+  it('lets Codex through in a checkout without the harness, and runs the guard when present', () => {
+    const { claude, codex } = commands();
+    expect(runHook(codex, { declared: false, present: false })).toBe('');
+    expect(runHook(codex, { declared: true, present: true })).toBe('ran');
+    expect(runHook(claude, { declared: true, present: true })).toBe('ran');
   });
 });

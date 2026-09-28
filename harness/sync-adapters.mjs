@@ -30,12 +30,23 @@ const SKILLS_SOURCE = '.agents/skills';
 const RUN = 'node .agents/sync-adapters.mjs';
 
 const READ_ONLY_CLAUDE_TOOLS = 'Read, Grep, Glob, Bash, WebFetch, WebSearch';
-// Codex reads .codex/hooks.json from the main checkout but runs the command in
-// the current worktree, which may predate the script: a missing script exits
-// quietly instead of failing every tool call.
+// A missing hook script fails closed for the enforcement hook (PreToolUse):
+// the tool call is refused with a message saying how to restore it. The
+// context hooks (anchor, healing, review stamp, stop) stay fail-open, since
+// without them a session loses context, not a protection. Codex reads
+// .codex/hooks.json from the main checkout but runs the command in the
+// current worktree, which may predate the harness or not carry it at all:
+// there a missing script passes, unless that checkout's manifest declares it.
+const MISSING_GUARD = (source) => `The agent guard ${source} is missing from this checkout, so every tool call is refused. Restore it outside the agent (in Claude Code: ! git restore ${source}), then retry.`;
+const denyJson = (source) => JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: MISSING_GUARD(source) } });
+const runner = (source, tool) => `${source.endsWith('.sh') ? 'bash' : 'node'} "$f"${source.endsWith('.sh') ? '' : ` --tool ${tool}`}`;
 const HOOK_COMMAND = {
-  claude: (source) => `${source.endsWith('.sh') ? 'bash' : 'node'} "$CLAUDE_PROJECT_DIR/${source}"${source.endsWith('.sh') ? '' : ' --tool claude'}`,
-  codex: (source) => `f="$(git rev-parse --show-toplevel)/${source}"; [ -f "$f" ] || exit 0; ${source.endsWith('.sh') ? 'bash' : 'node'} "$f"${source.endsWith('.sh') ? '' : ' --tool codex'}`,
+  claude: (source, event) => (event === 'PreToolUse'
+    ? `f="$CLAUDE_PROJECT_DIR/${source}"; [ -f "$f" ] || { printf '%s\\n' '${denyJson(source)}'; exit 0; }; ${runner(source, 'claude')}`
+    : `${source.endsWith('.sh') ? 'bash' : 'node'} "$CLAUDE_PROJECT_DIR/${source}"${source.endsWith('.sh') ? '' : ' --tool claude'}`),
+  codex: (source, event) => (event === 'PreToolUse'
+    ? `r="$(git rev-parse --show-toplevel)"; f="$r/${source}"; if [ ! -f "$f" ]; then grep -qF '"${source}"' "$r/.agents/manifest.json" 2>/dev/null || exit 0; printf '%s\\n' '${denyJson(source)}'; exit 0; fi; ${runner(source, 'codex')}`
+    : `f="$(git rev-parse --show-toplevel)/${source}"; [ -f "$f" ] || exit 0; ${runner(source, 'codex')}`),
 };
 const LINK = /\]\((?!https?:|mailto:|#|\/)([^)\s#]+)(#[^)\s]*)?\)/g;
 
@@ -154,7 +165,7 @@ export function generate(root = '.') {
           problems.push(`.agents/manifest.json: hook ${entry.id} needs options.${tool} as a list of { event, matcher?, timeout? }`);
           continue;
         }
-        for (const spec of specs) addHook(hooks[tool], spec, HOOK_COMMAND[tool](entry.source));
+        for (const spec of specs) addHook(hooks[tool], spec, HOOK_COMMAND[tool](entry.source, spec.event));
       }
     } else if (entry.kind === 'skill') {
       const names = skillNames(root, entry.source);

@@ -17,6 +17,9 @@ const HEAD = 'a'.repeat(40);
 const OLD = 'b'.repeat(40);
 const SESSION = '00000000-0000-4000-8000-00000000000a';
 
+// What deps.harnessNames returns for the fixture repository.
+const HARNESS_NAMES = new Set(['.agents', 'hooks', 'guard.mjs', 'lib.mjs', 'harness.config.json', '.claude', 'settings.json', 'agents', 'reviewer.md', 'healing', 'nightly.mjs', 'rules', 'learned', 'some-rule.md', '.git', 'pre-commit', 'pre-commit.sample']);
+
 const L0 = [{ role: 'assistant', text: 'Level L0: one-word fix.' }];
 const L1 = [{ role: 'assistant', text: 'Level L1: one script.' }];
 
@@ -32,7 +35,7 @@ const CONFIG = { ...DEFAULT_CONFIG, productionCommands: PRODUCTION, docsCheck: [
 const GREEN_RUN = { event: 'workflow_dispatch', headSha: HEAD, headBranch: 'feature/x', conclusion: 'success', status: 'completed' };
 const REFS = { HEAD, [HEAD]: HEAD, dev: HEAD, 'feature/x': HEAD, 'refs/remotes/origin/dev': OLD };
 
-function deps({ transcript = L1, pull, ghError, files = {}, branch = 'feature/x', env = {}, reviews = {}, runs = [GREEN_RUN], refs = REFS, ancestor = true, gitConfig = {}, settings = {}, diff = ['src/app.ts'], status = [], lines = {}, docFindings = [], issue = { labels: [] }, readers = [] } = {}) {
+function deps({ transcript = L1, pull, ghError, files = {}, branch = 'feature/x', env = {}, reviews = {}, runs = [GREEN_RUN], refs = REFS, ancestor = true, gitConfig = {}, settings = {}, diff = ['src/app.ts'], status = [], lines = {}, docFindings = [], issue = { labels: [] }, readers = [], harnessNames = HARNESS_NAMES } = {}) {
   const calls = [];
   return {
     calls,
@@ -80,6 +83,10 @@ function deps({ transcript = L1, pull, ghError, files = {}, branch = 'feature/x'
     review: (sha) => reviews[sha] ?? null,
     configGet: (key) => gitConfig[key] ?? '',
     transcript: () => transcript,
+    harnessNames: () => {
+      if (harnessNames instanceof Error) throw harnessNames;
+      return harnessNames;
+    },
   };
 }
 
@@ -1296,5 +1303,170 @@ describe('shell unwrapping for the guard', () => {
     ['stdbuf -oL echo hi', 'pass'],
   ])('%s -> %s', (command, expected) => {
     expect(decide(command)).toBe(expected);
+  });
+});
+
+describe('commands that reach files without naming them', () => {
+  it.each([
+    'find . -name .DS_Store -delete',
+    'find . -iname "*.orig" -delete',
+    'find . -type f -name "*.rej" -exec rm -f {} +',
+    'find . -name .DS_Store -print0 | xargs -0 rm',
+    'find src -name "*.tmp" -delete',
+  ])('lets a find through when its -name cannot match a harness name: %s', (command) => {
+    expect(decide(command)).toBe('pass');
+  });
+
+  it.each([
+    'find . -name "*.mjs" -delete',
+    'find . -name "*.md" -delete',
+    'find . -name "guard.*" -delete',
+    'find . -iname HOOKS -exec rm -rf {} +',
+    'find . -name "pre-commit*" -delete',
+    'find . -name "[gs]uard.mjs" -delete',
+    'find . -name .DS_Store -o -name x -delete',
+    'find . ! -name .DS_Store -delete',
+    'find . -delete -name .DS_Store',
+    'find . -name .DS_Store -exec rm -rf .agents/hooks \\;',
+    'find . -name .DS_Store -exec python3 edit.py {} \\;',
+  ])('still asks when the find can reach a harness file: %s', (command) => {
+    expect(decide(command)).toBe('ask');
+  });
+
+  it('asks when the harness names cannot be listed', () => {
+    expect(decide('find . -name .DS_Store -delete', { harnessNames: new Error('git failed') })).toBe('ask');
+  });
+
+  it.each([
+    'find .agents/hooks -print0 | xargs -0 rm',
+    'find .claude -type f | xargs chmod 000',
+    'ls .agents/hooks | xargs -I{} rm .agents/hooks/{}',
+    'echo .claude/settings.json | xargs rm',
+    'git ls-files .agents | xargs sed -i s/a/b/',
+    'printf "%s\\n" .agents/hooks/guard.mjs | xargs -n1 -P4 truncate -s 0',
+    'xargs -a list.txt rm',
+    'xargs --arg-file=list.txt rm',
+    'find . -print0 | xargs -0 rm',
+    'echo x | xargs rm .agents/hooks/guard.mjs',
+    'echo x | xargs cp -t .claude',
+  ])('asks when xargs changes harness files: %s', (command) => {
+    expect(decide(command, { files: { '/repo/list.txt': 'src/a.ts\n.agents/hooks/guard.mjs\n' } })).toBe('ask');
+  });
+
+  it.each([
+    'find src -name "*.orig" | xargs rm',
+    'git ls-files src | xargs grep -l needle',
+    'ls .agents/hooks | xargs -n1 echo',
+    'echo tmp/a | xargs rm',
+  ])('lets harmless xargs through: %s', (command) => {
+    expect(decide(command)).toBe('pass');
+  });
+
+  it('refuses xargs removals in the approval store and the journal', () => {
+    expect(decide('ls .git/agent-review-stamps/reviews | xargs rm')).toBe('deny');
+  });
+
+  it.each([
+    'rsync -a /tmp/x/ .claude/',
+    'rsync -av --delete /tmp/hooks/ .agents/hooks',
+    'rsync -e ssh -a host:/x/ .codex/',
+    'rsync --exclude node_modules -a /tmp/x/ .',
+    'rsync -a --remove-source-files .agents/hooks/ /tmp/backup/',
+    'ditto /tmp/x .claude',
+    'tar xf /tmp/a.tar -C .agents',
+    'tar -xzf /tmp/a.tgz --directory .claude',
+    'tar --extract --file=/tmp/a.tar --directory=.agents/hooks',
+    'tar xzfC /tmp/a.tgz .codex',
+    'tar xf /tmp/a.tar',
+    'bsdtar -xf /tmp/a.tar -C.agents',
+    'tar czf .claude/settings.json src',
+    'unzip /tmp/a.zip -d .agents',
+    'unzip -o /tmp/a.zip',
+  ])('asks when a sync or an archive writes into the harness: %s', (command) => {
+    expect(decide(command)).toBe('ask');
+  });
+
+  it.each([
+    'rsync -a /tmp/x/ dist/',
+    'rsync -a .agents/hooks/ /tmp/backup/',
+    'ditto .claude /tmp/claude-copy',
+    'tar xf /tmp/a.tar -C /tmp/out',
+    'tar czf /tmp/harness.tgz .agents',
+    'tar tf /tmp/a.tar',
+    'unzip -l /tmp/a.zip',
+    'unzip /tmp/a.zip -d /tmp/out',
+  ])('lets syncs and archives elsewhere through: %s', (command) => {
+    expect(decide(command)).toBe('pass');
+  });
+
+  it.each([
+    'cp -rt .claude /tmp/settings.json',
+    'cp -at.claude /tmp/settings.json',
+    'mv -ft .codex /tmp/hooks.json',
+    'ln -sft .claude /tmp/settings.json',
+    'install -Dm644 -t .claude /tmp/settings.json',
+    'install -Dt .agents/hooks /tmp/guard.mjs',
+  ])('reads a target directory inside a short-option cluster: %s', (command) => {
+    expect(decide(command)).toBe('ask');
+  });
+
+  it.each([
+    'cp -rt /tmp/out src',
+    'install -Dm644 /tmp/x dist/x',
+    'cp -S .bak src/a src/b',
+  ])('keeps clustered copies elsewhere passing: %s', (command) => {
+    expect(decide(command)).toBe('pass');
+  });
+});
+
+describe('the nightly admission session', () => {
+  const nightly = { env: { HARNESS_NIGHTLY: '1' } };
+
+  it.each([
+    'git push origin HEAD:refs/heads/feature/x',
+    'git push origin feature/x',
+    'git push origin v1.0.0',
+    'git push --tags',
+    'git push',
+    `git push origin ${HEAD}:refs/heads/dev ${HEAD}:refs/heads/other`,
+  ])('denies a push that reaches anything but the integration branch: %s', (command) => {
+    expect(decide(command, nightly)).toBe('deny');
+  });
+
+  it.each([
+    'gh pr create --title x --body y',
+    'gh pr comment 7 --body x',
+    'gh pr merge 7',
+    'gh issue create --title x --body y',
+    'gh issue comment 7 --body x',
+    'gh issue close 7',
+    'gh label create x',
+    'gh workflow run ci.yml',
+    'gh api repos/o/r/issues -f title=x',
+    'gh api -X PATCH repos/o/r/issues/7',
+    'gh api graphql -f query=x',
+    'gh repo edit --visibility public',
+    'gh release create v1',
+  ])('denies any GitHub write: %s', (command) => {
+    expect(decide(command, nightly)).toBe('deny');
+  });
+
+  it.each([
+    'gh pr view 7 --json number',
+    'gh pr list --state open',
+    'gh issue view 7',
+    'gh issue list --label self-healing',
+    'gh run list --workflow ci.yml',
+    'gh api repos/o/r/issues/7',
+    'gh api -X GET repos/o/r/pulls',
+    'gh search issues x',
+    'git show --stat HEAD',
+  ])('lets GitHub and git reads through: %s', (command) => {
+    expect(decide(command, nightly)).toBe('pass');
+  });
+
+  it('leaves other sessions free to write to GitHub and push feature branches', () => {
+    expect(decide('gh pr create --title x --body y')).toBe('pass');
+    expect(decide('git push origin feature/x')).toBe('pass');
   });
 });
