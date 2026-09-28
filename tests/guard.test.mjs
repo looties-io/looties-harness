@@ -18,7 +18,7 @@ const OLD = 'b'.repeat(40);
 const SESSION = '00000000-0000-4000-8000-00000000000a';
 
 // What deps.harnessNames returns for the fixture repository.
-const HARNESS_NAMES = new Set(['.agents', 'hooks', 'guard.mjs', 'lib.mjs', 'harness.config.json', '.claude', 'settings.json', 'agents', 'reviewer.md', 'healing', 'nightly.mjs', 'rules', 'learned', 'some-rule.md', '.git', 'pre-commit', 'pre-commit.sample']);
+const HARNESS_NAMES = new Set(['repo', 'agent-review-stamps', 'reviews', '.agents', 'hooks', 'guard.mjs', 'lib.mjs', 'harness.config.json', '.claude', 'settings.json', 'agents', 'reviewer.md', 'healing', 'nightly.mjs', 'rules', 'learned', 'some-rule.md', '.git', 'pre-commit', 'pre-commit.sample']);
 
 const L0 = [{ role: 'assistant', text: 'Level L0: one-word fix.' }];
 const L1 = [{ role: 'assistant', text: 'Level L1: one script.' }];
@@ -1468,5 +1468,110 @@ describe('the nightly admission session', () => {
   it('leaves other sessions free to write to GitHub and push feature branches', () => {
     expect(decide('gh pr create --title x --body y')).toBe('pass');
     expect(decide('git push origin feature/x')).toBe('pass');
+  });
+});
+
+describe('the find and xargs checks after review', () => {
+  it.each([
+    "find .agents -name '[[:alpha:]]*' -exec rm -rf {} +",
+    "find .agents -maxdepth 1 -name '[[:lower:]]ooks' -exec rm -rf {} +",
+    "find . -name '[![:upper:]]uard.mjs' -delete",
+    "find . -name '[[=g=]]uard.mjs' -delete",
+    "find . -name '[[:nope:]]x' -delete",
+    'find /repo -maxdepth 0 -name repo -exec rm -rf {} +',
+    'find . -name reviews -exec cp /tmp/f.json {}/forged.json \\;',
+    // A bracket expression is never read (review round 2).
+    "find . -name '[!]a]*' -exec rm -rf {} +",
+    "find . -name '[]a]*' -exec rm -rf {} +",
+    "find . -name '[\\]a]*' -exec rm -rf {} +",
+    "find . -name '[a[:digit:]]gents' -exec rm -rf {} +",
+    "find . -name '[[:digit:]]*.tmp' -delete",
+    // The action reaches past the found file.
+    'find . -name skills -type d -exec rm -rf {}/../hooks \\;',
+    'find . -name src -type d -exec cp /tmp/evil {}/../hooks/guard.mjs \\;',
+    'find . -name x -exec rm -rf {} .. \\;',
+  ])('asks when a -name can still select a harness path: %s', (command) => {
+    expect(decide(command)).toBe('ask');
+  });
+
+  it('denies a find that names the approval store', () => {
+    expect(decide('find . -name agent-review-stamps -exec rm -rf {} +')).toBe('deny');
+  });
+
+  it.each([
+    "find . -name '.e[]n]v*' -exec cat {} +",
+    "find . -name '.e[n[:digit:]]v*' -exec cat {} +",
+  ])('denies printing through a bracket expression it cannot read: %s', (command) => {
+    expect(decide(command)).toBe('deny');
+  });
+
+  it.each([
+    "find . -iname '.ENV.LOCAL' -exec cat {} \\;",
+    "find . -name '.ENV.LOCAL' -exec cat {} \\;",
+    "find . -name '.e*' -exec cat {} \\;",
+    'find . -name .env.local -exec cat {} \\;',
+    "find . -name '*.local' -exec head {} +",
+  ])('denies printing a .env file that find selects: %s', (command) => {
+    expect(decide(command)).toBe('deny');
+  });
+
+  it.each([
+    'find . -name .env.example -exec cat {} \\;',
+    "find src -name '*.ts' -exec cat {} \\;",
+  ])('lets find print other files: %s', (command) => {
+    expect(decide(command)).toBe('pass');
+  });
+
+  it.each([
+    'cd /tmp/work && ls /tmp/work | xargs rm',
+    'cd scripts && ls *.tmp | xargs rm',
+    "find . -name '*.mjs' -not -path './node_modules/*' | xargs node --check",
+    'git ls-files "*.mjs" | xargs node -c',
+  ])('reads xargs producers from their own directory and lets checks through: %s', (command) => {
+    expect(decide(command)).toBe('pass');
+  });
+
+  it.each([
+    'cd .agents && ls | xargs rm -rf',
+    // A producer may still run from the session directory.
+    '(cd /tmp); ls .agents | xargs rm -rf',
+    'cd /nonexistent; ls .agents | xargs rm -rf',
+    'cd .agents; cd /tmp; ls hooks | xargs rm -rf',
+    // The directory cannot be followed.
+    'cd /tmp && cd - && find . -maxdepth 1 | xargs rm -rf',
+    'pushd .agents && pushd /tmp && popd && ls hooks | xargs rm -rf',
+    'cd "$OLDPWD" && ls hooks | xargs rm -rf',
+    'cd .agent? && echo hooks | xargs rm -rf',
+    // Not a syntax check.
+    'ls .agents/hooks/*.mjs | xargs node evil.mjs -c',
+    'ls .agents/hooks/*.mjs | xargs deno run -c deno.json evil.ts',
+    'ls .agents/hooks/*.mjs | xargs node -r ./evil.cjs --check',
+    // The script flag never hides the edited file.
+    "sed -i -e 's/a/b/' .agents/hooks/guard.mjs",
+    "sed -i.bak 's/a/b/' .claude/settings.json",
+    "sed -ie 's/a/b/' .agents/hooks/guard.mjs",
+    "perl -pi -e 's/a/b/' .agents/hooks/guard.mjs",
+    "perl -i -pe 's/a/b/' .agents/hooks/guard.mjs",
+    // Review round 3: an option after -e is not the script.
+    "perl -pi -e 's/a/b/' -Mre .agents/hooks/guard.mjs",
+    "perl -i -pe 's/a/b/' -Ie .agents/hooks/guard.mjs",
+    "sed -i -e 's/a/b/' -le .agents/hooks/guard.mjs",
+    "sed -i -e 's/a/b/' -e .agents/hooks/guard.mjs",
+    // macOS -I and GNU abbreviations of --in-place.
+    "sed -I '' 's/a/b/' .agents/hooks/guard.mjs",
+    "sed --in 's/a/b/' .agents/hooks/guard.mjs",
+    'cd /tmp && ls /repo/.agents/hooks | xargs -I{} rm /repo/.agents/hooks/{}',
+  ])('still asks when an xargs producer, a script flag or a cd may name the harness: %s', (command) => {
+    expect(decide(command)).toBe('ask');
+  });
+
+  it('denies a GitHub GraphQL call to the nightly session whatever its method', () => {
+    expect(decide('gh api -X GET graphql -f query=x', { env: { HARNESS_NIGHTLY: '1' } })).toBe('deny');
+  });
+
+  it('lists the checkout, the approval stores and the harness files as harness names', () => {
+    const names = defaultDeps.harnessNames(repoRoot);
+    for (const name of [path.basename(repoRoot), 'agent-review-stamps', 'reviews', 'settings.json', '.agents']) expect(names.has(name), name).toBe(true);
+    expect(names.has('.DS_Store')).toBe(false);
   });
 });

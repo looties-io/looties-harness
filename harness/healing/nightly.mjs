@@ -187,8 +187,10 @@ function admit() {
  * Moves the pass's own checkout to the admitted commit, so the drafting run
  * and the canaries of the same night see the rules admitted tonight. Only a
  * detached, clean checkout that the commit fast-forwards moves: the dedicated
- * nightly worktree, never a checkout someone works in. The admission commit
- * only adds documentation, so the code already loaded stays valid.
+ * nightly worktree, never a checkout someone works in. And only when every
+ * commit in between touches documentation and learned rules alone: code that
+ * reached dev since the pass started would disagree with the code this
+ * process already loaded, so the new rules then wait for the next night.
  */
 export function advanceCheckout(sha, { cwd = repoRoot } = {}) {
   const git = (args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -196,6 +198,8 @@ export function advanceCheckout(sha, { cwd = repoRoot } = {}) {
   const status = git(['status', '--porcelain', '--untracked-files=no']);
   if (status.status !== 0 || status.stdout.trim()) return 'checkout has local changes, left as is';
   if (git(['merge-base', '--is-ancestor', 'HEAD', sha]).status !== 0) return `${sha.slice(0, 12)} does not fast-forward the checkout, left as is`;
+  const changed = git(['diff', '--name-only', '--no-renames', 'HEAD', sha]);
+  if (changed.status !== 0 || changed.stdout.split('\n').filter(Boolean).some((file) => !/^(?:docs\/|\.agents\/rules\/learned\/)/.test(file))) return 'code reached the integration branch since the pass started, left as is until the next night';
   if (git(['checkout', '--quiet', '--detach', sha]).status !== 0) return `checkout of ${sha.slice(0, 12)} failed, left as is`;
   return `checkout moved to ${sha.slice(0, 12)}`;
 }

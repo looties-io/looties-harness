@@ -1071,4 +1071,17 @@ describe('the pass sees the rules it admitted the same night', () => {
     expect(git('rev-parse', 'HEAD')).toBe(admitted);
     rmSync(root, { recursive: true, force: true });
   });
+
+  it('waits for the next night when code reached the integration branch between the checkout and the admission', () => {
+    const { root, git, base } = repository();
+    git('checkout', '-q', 'main');
+    writeFileSync(path.join(root, 'code.mjs'), 'export {};\n');
+    git('add', 'code.mjs');
+    git('commit', '-q', '-m', 'code');
+    const withCode = git('rev-parse', 'HEAD');
+    git('checkout', '-q', '--detach', base);
+    expect(advanceCheckout(withCode, { cwd: root })).toMatch(/code reached the integration branch/);
+    expect(git('rev-parse', 'HEAD')).toBe(base);
+    rmSync(root, { recursive: true, force: true });
+  });
 });
