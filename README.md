@@ -4,6 +4,12 @@ The agent harness we run to build [Looties](https://looties.io), the marketplace
 
 One developer, several coding agents, one production codebase. This is the part of our L-Stack that keeps those agents fast on small things, careful on risky things, and unable to quietly remove their own safety nets. It works with Claude Code and Codex, has zero runtime dependencies, and fits in one `.agents/` folder.
 
+## L-stack V2
+
+V2 keeps the existing levels and guards, and adds provider-neutral mission receipts, actual skill delivery/application evidence, cumulative quality/security hardening at seven active coding days or fifty code PRs, and separate safety/benefit evidence for learned rules. Read the [execution policy](docs/lstack-v2.md).
+
+For the complete curated workflow, install with `node install.mjs <target-repo> --skills-root <looties-skills-checkout>`. Existing customized repositories need a selective migration; do not overwrite their local rules or skill adaptations with `--force`. The bundled durable workflow uses the existing Orca scheduler and decision records. No external agent runtime or production dependency is added.
+
 ## What you get
 
 | Piece | What it does for you |

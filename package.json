@@ -1,8 +1,8 @@
 {
   "name": "looties-harness",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "A small, self-guarding agent harness for Claude Code and Codex: levels, guard, anchor, review stamps and a self-healing loop.",
+  "description": "A small agent-neutral harness: proportional levels, guards, durable missions, cumulative hardening and evidence-based improvement.",
   "license": "MIT",
   "type": "module",
   "engines": {

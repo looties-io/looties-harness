@@ -36,6 +36,33 @@ const read = (root, file) => readFileSync(path.join(root, file), 'utf8');
 const node = (root, ...args) => execFileSync(process.execPath, args, { cwd: root, encoding: 'utf8', stdio: 'pipe', env });
 
 describe('install.mjs', () => {
+  it('connects V2 to the canonical entrypoint without replacing local instructions', () => {
+    const root = repository(); writeFileSync(path.join(root, 'AGENTS.md'), '# Local policy\nKeep the existing owner.\n');
+    expect(run(root).status).toBe(0);
+    expect(read(root, 'AGENTS.md')).toContain('Keep the existing owner.');
+    expect(read(root, 'AGENTS.md')).toContain('.agents/skills/lstack-workflow/SKILL.md');
+    expect(existsSync(path.join(root, '.agents/runtime/mission.mjs'))).toBe(true);
+    expect(existsSync(path.join(root, 'docs/lstack-v2.md'))).toBe(true);
+    expect(run(root, '--force').status).toBe(0);
+    expect(read(root, 'AGENTS.md').match(/<!-- lstack-v2:start -->/g)).toHaveLength(1);
+  });
+
+  it('refuses an incomplete selected skill bundle before writing anything', () => {
+    const root = repository(); const skills = repository();
+    expect(run(root, '--skills-root', skills).status).toBe(1);
+    expect(existsSync(path.join(root, '.agents'))).toBe(false);
+  });
+
+  it('accepts a complete selected bundle before the positional target without installing into the source', () => {
+    const root = repository(); const skills = repository();
+    for (const name of ['code-cleanup', 'impossible-by-design', 'harness-testing', 'agentic-peer-review', 'security-hardening']) {
+      mkdirSync(path.join(skills, name)); writeFileSync(path.join(skills, name, 'SKILL.md'), `---\nname: ${name}\ndescription: "Fixture"\n---\nRead the contract.\n`);
+    }
+    expect(run('--skills-root', skills, root).status).toBe(0);
+    expect(existsSync(path.join(skills, '.agents'))).toBe(false);
+    expect(read(root, '.agents/skills/code-cleanup/SKILL.md')).toContain('Read the contract.');
+    expect(node(root, '.agents/sync-adapters.mjs', '--check')).toContain('Agent adapters match');
+  });
   it('installs .agents/, generates clean adapters and prints the next steps', () => {
     const root = repository();
     const { status, stdout } = run(root);
