@@ -28,6 +28,14 @@ const STANDARD = join('docs', 'agent-harness.md');
 const CONFIG = join('.agents', 'harness.config.json');
 const EXAMPLE = join('.agents', 'harness.config.example.json');
 const FALLBACK_CONFIG = { branches: { integration: 'dev', release: 'main' } };
+export const V2_SKILLS = ['code-cleanup', 'impossible-by-design', 'harness-testing', 'agentic-peer-review', 'security-hardening'];
+export const V2_ROUTING = `<!-- lstack-v2:start -->
+## L-stack V2
+
+Read the repository harness standard and [V2 execution policy](docs/lstack-v2.md).
+For code changes, read the applicable installed skills before intervention: code-cleanup for structural quality, impossible-by-design for recurring defects, and harness-testing for real behavioral checks. Use agentic-peer-review and security-hardening for cumulative campaigns. Inspect the local catalog; do not substitute a skill name for its complete instructions.
+For an approved long mission, an explicit unattended request (including "I am going to bed; finish this"), a restart or periodic hardening, read [.agents/skills/lstack-workflow/SKILL.md](.agents/skills/lstack-workflow/SKILL.md) and use its durable receipt commands. Resume existing work and authorization. Block only the action needing a new approval; continue independent authorized work. Preserve existing review and merge rules.
+<!-- lstack-v2:end -->`;
 
 function filesUnder(root, directory = '') {
   return readdirSync(join(root, directory), { withFileTypes: true }).flatMap((entry) => {
@@ -99,13 +107,18 @@ function seedAskRules(target) {
  * Installs the harness into `target`. Returns { ok, messages }; `ok` false
  * means nothing was written (a refusal) or the generator reported problems.
  */
-export function install(target, { force = false, log = () => {} } = {}) {
+export function install(target, { force = false, skillsRoot = null, log = () => {} } = {}) {
   const root = resolve(target);
   if (!existsSync(root) || !lstatSync(root).isDirectory()) return { ok: false, messages: [`${target}: not a directory`] };
   if (realpathSync(root) === realpathSync(PACKAGE_ROOT)) return { ok: false, messages: ['Install into another repository, not into the harness package itself.'] };
 
   const sources = filesUnder(SOURCE);
+  if (skillsRoot) {
+    const missing = V2_SKILLS.filter((name) => !existsSync(join(skillsRoot, name, 'SKILL.md')));
+    if (missing.length) return { ok: false, messages: [`Missing selected skill sources: ${missing.join(', ')}. Nothing was written.`] };
+  }
   const existing = sources.map((file) => join('.agents', file)).filter((file) => existsSync(join(root, file)) && file !== CONFIG);
+  if (skillsRoot) existing.push(...V2_SKILLS.map((name) => `.agents/skills/${name}`).filter((file) => existsSync(join(root, file))));
   const conflicts = adapterConflicts(root);
   if (!force && (existing.length > 0 || conflicts.length > 0)) {
     const messages = [];
@@ -123,6 +136,7 @@ export function install(target, { force = false, log = () => {} } = {}) {
     cpSync(join(SOURCE, file), destination);
   }
   log(`Copied ${sources.length} harness files to .agents/.`);
+  if (skillsRoot) for (const name of V2_SKILLS) cpSync(join(skillsRoot, name), join(root, '.agents/skills', name), { recursive: true });
 
   if (!existsSync(join(root, CONFIG))) {
     const example = existsSync(join(root, EXAMPLE)) ? readFileSync(join(root, EXAMPLE), 'utf8') : `${JSON.stringify(FALLBACK_CONFIG, null, 2)}\n`;
@@ -137,6 +151,13 @@ export function install(target, { force = false, log = () => {} } = {}) {
     cpSync(join(PACKAGE_ROOT, STANDARD), join(root, STANDARD));
     log(`Copied the standard to ${STANDARD}.`);
   }
+
+  const policy = join(root, 'docs/lstack-v2.md');
+  if (!existsSync(policy) || force) { mkdirSync(dirname(policy), { recursive: true }); cpSync(join(PACKAGE_ROOT, 'docs/lstack-v2.md'), policy); }
+  const entrypoint = join(root, 'AGENTS.md');
+  const instructions = existsSync(entrypoint) ? readFileSync(entrypoint, 'utf8') : '# Agent instructions\n';
+  if (!instructions.includes('<!-- lstack-v2:start -->')) writeFileSync(entrypoint, `${instructions.trimEnd()}\n\n${V2_ROUTING}\n`);
+  if (!existsSync(join(root, 'CLAUDE.md'))) writeFileSync(join(root, 'CLAUDE.md'), '@AGENTS.md\n');
 
   const added = seedAskRules(root);
   if (added.length > 0) log(`Added ${added.length} ask rule(s) to .claude/settings.json for the production commands.`);
@@ -153,7 +174,7 @@ export function nextSteps(target) {
   return [
     `Next steps, in ${resolve(target)}:`,
     `1. Edit ${CONFIG} (branches, CI workflow, production commands), then run \`node .agents/sync-adapters.mjs\` in the repository.`,
-    '2. Make sure the repository has an AGENTS.md (the base rule routes through it) and a CLAUDE.md that imports it with a line reading `@AGENTS.md`.',
+    '2. Review the V2 routing added to AGENTS.md and the CLAUDE.md import. Supply --skills-root <looties-skills-checkout> to install the five selected quality/security skills, or map the existing local equivalents before using their routes.',
     '3. Codex: open the repository once and trust the project, or .codex/hooks.json never runs.',
     '4. Install RTK (`brew install rtk && rtk init -g`, plus `rtk init -g --codex`) and caveman (`npx skills add JuliusBrussee/caveman -g`): they keep long multi-agent sessions inside their context budget, and the user-level rules assume both.',
     '5. Copy the user-level template user-level/AGENTS.md from the harness package to ~/.agents/AGENTS.md and adapt it.',
@@ -171,12 +192,22 @@ function isEntrypoint() {
 
 if (isEntrypoint()) {
   const args = process.argv.slice(2);
-  const target = args.find((arg) => !arg.startsWith('--'));
+  const positional = []; let skillsRoot = null;
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === '--skills-root') {
+      if (!args[index + 1] || args[index + 1].startsWith('--')) throw new Error('--skills-root requires a path');
+      skillsRoot = resolve(args[++index]);
+    } else if (args[index] === '--force' || args[index] === '--help') continue;
+    else if (args[index].startsWith('--')) throw new Error(`Unknown option: ${args[index]}`);
+    else positional.push(args[index]);
+  }
+  if (positional.length > 1) throw new Error('Specify exactly one target repository');
+  const target = positional[0];
   if (!target || args.includes('--help')) {
-    console.error('Usage: node install.mjs <target-repo> [--force]');
+    console.error('Usage: node install.mjs <target-repo> [--force] [--skills-root PATH]');
     process.exit(target ? 0 : 1);
   }
-  const { ok, messages } = install(target, { force: args.includes('--force'), log: (line) => console.log(line) });
+  const { ok, messages } = install(target, { force: args.includes('--force'), skillsRoot, log: (line) => console.log(line) });
   if (!ok) {
     console.error(messages.join('\n'));
     process.exit(1);

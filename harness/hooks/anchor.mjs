@@ -95,6 +95,7 @@ export function buildAnchor({ full, level, request, root = ROOT }) {
     level === null ? `## Current level\n${levelLine(null)}.` : `## Current level: L${level}\n${body(read(root, `.agents/levels/L${level}.md`))}`,
   ];
   if (request) sections.push(`## Current request\n"${truncate(request, 600)}"`);
+  if (existsSync(join(root, '.agents/skills/lstack-workflow/SKILL.md'))) sections.push('## Durable work\nFor long, unattended or resumed work and cumulative hardening, read .agents/skills/lstack-workflow/SKILL.md. Reconcile the existing mission and authorization before acting; skill installation is not proof of application. Finish requires current verification.');
   const instincts = instinctSources(root)
     .map((source) => ({ text: read(root, source), source }))
     .filter(({ text }) => body(text))

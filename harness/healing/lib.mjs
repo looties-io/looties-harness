@@ -52,6 +52,8 @@ export const NEVER_TOUCH = Object.freeze([
   '.agents/harness.config.json',
   '.agents/evals/',
   '.agents/healing/',
+  '.agents/runtime/',
+  'docs/lstack-v2.md',
   '.agents/sync-adapters.mjs',
   '.agents/check.mjs',
   '.claude/settings',

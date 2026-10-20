@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 //   node .agents/check.mjs   report every breach, exit 1 on any
 
 // `skills/` is optional: a repository may have no shared skills.
-export const HARNESS_DIRECTORIES = Object.freeze(['skills', 'rules', 'levels', 'agents', 'hooks', 'healing', 'instincts', 'evals', 'schemas']);
+export const HARNESS_DIRECTORIES = Object.freeze(['skills', 'rules', 'levels', 'agents', 'hooks', 'healing', 'instincts', 'evals', 'schemas', 'runtime']);
 export const HARNESS_FILES = Object.freeze(['manifest.json', 'manifest.state.json', 'sync-adapters.mjs', 'check.mjs', 'harness.config.json', 'harness.config.example.json']);
 export const MANIFEST_KINDS = Object.freeze(['rule', 'level', 'agent', 'hook', 'instinct', 'skill']);
 export const MANIFEST_VERSION = 1;

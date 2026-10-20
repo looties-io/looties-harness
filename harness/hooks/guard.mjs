@@ -46,7 +46,7 @@ const HARNESS_FILES = [
   /(?:^|\/)\.agents\/hooks(?:\/|$)/,
   /(?:^|\/)\.agents\/manifest(?:\.state)?\.json$/,
   /(?:^|\/)\.agents\/harness\.config\.json$/,
-  /(?:^|\/)\.agents\/(?:evals|rules\/learned|healing)(?:\/|$)/,
+  /(?:^|\/)\.agents\/(?:evals|rules\/learned|healing|runtime)(?:\/|$)/,
   /(?:^|\/)\.agents\/(?:sync-adapters|check)\.mjs$/,
   /(?:^|\/)\.agents\/agents\/(?:reviewer|healer)\.md$/,
   /(?:^|\/)\.claude\/agents\/(?:reviewer|healer)\.md$/,
@@ -60,8 +60,8 @@ const HARNESS_FILES = [
 const HARNESS_PARENTS = /(?:^|\/)(?:\.agents(?:\/rules|\/agents)?|\.claude(?:\/agents)?|\.codex(?:\/agents)?|\.git)$/;
 // Names of harness files that may be untracked, and the directories on the
 // way to them.
-const HARNESS_NAMES = [STAMP_DIRECTORY, 'reviews', 'worktrees', '.agents', '.claude', '.codex', '.git', '.husky', 'hooks', 'agents', 'evals', 'rules', 'learned', 'healing', 'settings.json', 'settings.local.json', 'hooks.json', 'config.toml', 'manifest.json', 'manifest.state.json', 'harness.config.json', 'reviewer.md', 'healer.md', 'reviewer.toml', 'sync-adapters.mjs', 'check.mjs'];
-const HARNESS_MENTION = /\.agents\/(?:hooks|manifest(?:\.state)?\.json|harness\.config\.json|agents\/(?:reviewer|healer)\.md|evals|healing|rules\/learned|sync-adapters\.mjs|check\.mjs)|(?:\.claude|\.codex)\/agents\/(?:reviewer|healer)|\.claude\/settings|\.codex\/(?:hooks\.json|config\.toml)|\.git\/hooks|\.husky/;
+const HARNESS_NAMES = [STAMP_DIRECTORY, 'reviews', 'worktrees', '.agents', '.claude', '.codex', '.git', '.husky', 'hooks', 'agents', 'evals', 'rules', 'learned', 'healing', 'runtime', 'settings.json', 'settings.local.json', 'hooks.json', 'config.toml', 'manifest.json', 'manifest.state.json', 'harness.config.json', 'reviewer.md', 'healer.md', 'reviewer.toml', 'sync-adapters.mjs', 'check.mjs'];
+const HARNESS_MENTION = /\.agents\/(?:hooks|manifest(?:\.state)?\.json|harness\.config\.json|agents\/(?:reviewer|healer)\.md|evals|healing|runtime|rules\/learned|sync-adapters\.mjs|check\.mjs)|(?:\.claude|\.codex)\/agents\/(?:reviewer|healer)|\.claude\/settings|\.codex\/(?:hooks\.json|config\.toml)|\.git\/hooks|\.husky/;
 // A write, removal or move whose arguments name a harness file. Only the call
 // counts: code that imports or reads these files, or merely quotes one in a
 // string it parses, passes.

@@ -248,7 +248,7 @@ async function replay() {
     const report = await runCanaries({ candidate, cases, root: repoRoot, ref: `origin/${integrationBranch()}` });
     const at = new Date().toISOString();
     writeDocument(`canaries/${candidate.id}/${at.replace(/[:.]/g, '-')}.json`, { at, ...report });
-    setStatus(candidate, report.verdict === 'pass' ? 'ready' : 'canary-failed', { canary: { verdict: report.verdict, ref: report.ref, results: report.results.map((entry) => ({ case: entry.case, outcome: entry.outcome })) }, note: report.verdict });
+    setStatus(candidate, report.eligible ? 'ready' : 'canary-failed', { canary: { verdict: report.verdict, benefit: report.benefit, eligible: report.eligible, ref: report.ref, results: report.results.map((entry) => ({ case: entry.case, outcome: entry.outcome })) }, note: `safety=${report.verdict}; benefit=${report.benefit}` });
     results.push(`${candidate.id} ${report.verdict}`);
   }
   return results.length > 0 ? results.join(', ') : 'no rule candidate to replay';

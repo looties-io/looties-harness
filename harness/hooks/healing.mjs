@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { missionEvidence } from '../runtime/store.mjs';
 import { appendRecord, journalMuted, readRecords, writeDocument } from './journal.mjs';
 import { effectiveLevel, isEntrypoint, normalize, readStdin, readTranscript, toolFromArgv, truncate } from './lib.mjs';
 
@@ -158,7 +159,7 @@ export function effectiveRecords(records) {
   return records.filter((record) => record.kind === 'interpretation').map((record) => (relabels.has(record.key) ? { ...record, class: relabels.get(record.key), method: 'relabelled' } : record));
 }
 
-export function sessionSummary(input, { messages, entries, events, ledger, branch = '' }) {
+export function sessionSummary(input, { messages, entries, events, ledger, branch = '', missions = { status: 'no-linked-mission', missions: [] } }) {
   const activity = toolActivity(entries);
   const guard = events.filter((event) => event.kind === 'guard' && event.sessionId === input.sessionId);
   return {
@@ -170,6 +171,7 @@ export function sessionSummary(input, { messages, entries, events, ledger, branc
     level: effectiveLevel(messages),
     userMessages: messages.filter((message) => message.role === 'user').length,
     skills: skillsUsed(activity),
+    skillObservability: { referencesOnly: true, ...missions },
     precommitFailures: precommitFailures(activity),
     guard: tally(guard.map((event) => event.decision)),
     guardReasons: [...new Set(guard.map((event) => event.rule).filter(Boolean))],
@@ -193,6 +195,7 @@ if (isEntrypoint(import.meta.url) && !journalMuted()) {
         events: readRecords('events', { since }),
         ledger: readRecords('ledger', { since }),
         branch: branchOf(input.cwd),
+        missions: missionEvidence(input.cwd, input.sessionId),
       });
       writeDocument(`sessions/${new Date().toISOString().slice(0, 7)}/${input.sessionId.replace(/[^A-Za-z0-9_-]/g, '_')}.json`, { at: new Date().toISOString(), ...summary });
     }

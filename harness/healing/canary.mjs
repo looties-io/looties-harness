@@ -81,6 +81,8 @@ export function rulesPrompt(root, candidate) {
 }
 
 export async function runCase(caseDefinition, { root = repoRoot, ref = defaultRef(root), rules = '', claude = process.env.HARNESS_CLAUDE_BIN || 'claude' } = {}) {
+  const model = caseDefinition.model || process.env.HARNESS_CANARY_MODEL;
+  if (caseDefinition.purpose === 'benefit' && !model) return { case: caseDefinition.id, pass: false, infrastructure: true, failures: ['Pin a model for a comparative benefit evaluation'] };
   const nonce = randomBytes(4).toString('hex');
   const worktree = mkdtempSync(path.join(tmpdir(), `harness-canary-${caseDefinition.id}-`));
   const branch = `canary/${caseDefinition.id}-${nonce}`;
@@ -94,14 +96,15 @@ export async function runCase(caseDefinition, { root = repoRoot, ref = defaultRe
     delete env[LOOP_ENV.healing];
     delete env[LOOP_ENV.nightly];
     const args = ['-p', caseDefinition.prompt.replaceAll('{nonce}', nonce), '--output-format', 'stream-json', '--verbose', '--permission-mode', 'bypassPermissions', '--max-turns', String(caseDefinition.maxTurns ?? 40)];
+    if (model) args.push('--model', model);
     if (rules) args.push('--append-system-prompt', rules);
     const session = spawnSync(claude, args, { cwd: worktree, env, encoding: 'utf8', timeout: (caseDefinition.timeoutMinutes ?? 15) * 60_000, maxBuffer: 256 * 1024 * 1024 });
     const { commands, finalText } = parseStream(session.stdout ?? '');
     const check = (await import(pathToFileURL(path.join(caseDefinition.directory, 'check.mjs')).href)).default;
-    const verdict = session.error?.code === 'ETIMEDOUT'
-      ? { pass: false, failures: [`timed out after ${caseDefinition.timeoutMinutes ?? 15} minutes`] }
+    const verdict = session.error || session.status !== 0
+      ? { pass: false, failures: [session.error?.message ?? `agent exited ${session.status}`] }
       : await check({ worktree, baseSha, commands, finalText, nonce, before });
-    return { case: caseDefinition.id, pass: verdict.pass, failures: verdict.failures, exitCode: session.status, durationMs: Date.now() - started, commands: commands.slice(0, 60), answer: finalText.slice(0, 1000) };
+    return { case: caseDefinition.id, pass: verdict.pass, failures: verdict.failures, infrastructure: Boolean(session.error || session.status !== 0), model: model ?? 'default', exitCode: session.status, durationMs: Date.now() - started, commands: commands.slice(0, 60), answer: finalText.slice(0, 1000) };
   } catch (error) {
     return { case: caseDefinition.id, pass: false, failures: [`the canary could not run: ${String(error?.message ?? error).split('\n')[0]}`], infrastructure: true, durationMs: Date.now() - started };
   } finally {
@@ -111,9 +114,9 @@ export async function runCase(caseDefinition, { root = repoRoot, ref = defaultRe
 }
 
 /**
- * Runs every case with the candidate. A failing case runs again with it and
- * once without it: the candidate is blamed only when it fails twice and the
- * baseline passes; anything else is inconclusive and blocks the admission.
+ * Compare protected behavior against its baseline, repeat failures, and
+ * measure held-out benefit separately with repeated paired runs. Preservation
+ * alone never establishes benefit or makes a candidate eligible.
  */
 export async function runCanaries({ candidate = null, cases, root = repoRoot, ref = defaultRef(root), runner = runCase }) {
   const withRule = rulesPrompt(root, candidate);
@@ -121,8 +124,18 @@ export async function runCanaries({ candidate = null, cases, root = repoRoot, re
   const results = [];
   for (const caseDefinition of cases) {
     const first = await runner(caseDefinition, { root, ref, rules: withRule });
+    if (caseDefinition.purpose === 'benefit') {
+      const without = await runner(caseDefinition, { root, ref, rules: baseline });
+      const again = await runner(caseDefinition, { root, ref, rules: withRule });
+      const baselineAgain = await runner(caseDefinition, { root, ref, rules: baseline });
+      const runs = [first, without, again, baselineAgain];
+      const improved = candidate?.type === 'rule' && caseDefinition.heldOut === true && first.pass === true && again.pass === true && without.pass === false && baselineAgain.pass === false && !runs.some((r) => r.infrastructure);
+      results.push({ case: caseDefinition.id, purpose: 'benefit', outcome: improved ? 'improved' : 'unproven', runs });
+      continue;
+    }
     if (first.pass) {
-      results.push({ case: caseDefinition.id, outcome: 'pass', runs: [first] });
+      const without = await runner(caseDefinition, { root, ref, rules: baseline });
+      results.push({ case: caseDefinition.id, outcome: without.pass ? 'pass' : 'failing-without-candidate', runs: [first, without] });
       continue;
     }
     const again = await runner(caseDefinition, { root, ref, rules: withRule });
@@ -130,8 +143,11 @@ export async function runCanaries({ candidate = null, cases, root = repoRoot, re
     const outcome = !again.pass && without.pass && candidate ? 'broken-by-candidate' : (again.pass ? 'flaky' : 'failing-without-candidate');
     results.push({ case: caseDefinition.id, outcome, runs: [first, again, without] });
   }
-  const verdict = results.every((entry) => entry.outcome === 'pass') ? 'pass' : (results.some((entry) => entry.outcome === 'broken-by-candidate') ? 'fail' : 'inconclusive');
-  return { verdict, ref, candidate: candidate?.id ?? null, results };
+  const safety = results.filter((entry) => entry.purpose !== 'benefit');
+  const verdict = safety.length > 0 && safety.every((entry) => entry.outcome === 'pass') ? 'pass' : (safety.some((entry) => entry.outcome === 'broken-by-candidate') ? 'fail' : 'inconclusive');
+  const benefits = results.filter((entry) => entry.purpose === 'benefit');
+  const benefit = benefits.length > 0 && benefits.every((entry) => entry.outcome === 'improved') ? 'demonstrated' : 'unproven';
+  return { verdict, benefit, eligible: verdict === 'pass' && benefit === 'demonstrated', ref, candidate: candidate?.id ?? null, results };
 }
 
 function option(name) {
