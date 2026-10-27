@@ -192,7 +192,7 @@ install.mjs
 tests/                   <- vitest: guard, config, anchor, generator, check, stamps, self-healing, installer
 ```
 
-Run the tests with `npm install && npm test`.
+Run the tests with `npm install && npm test`. To contribute, read the [contributing guide](CONTRIBUTING.md); to report a vulnerability, see the [security policy](SECURITY.md).
 
 ## Related
 
