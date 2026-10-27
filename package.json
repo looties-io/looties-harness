@@ -5,6 +5,12 @@
   "description": "A small agent-neutral harness: proportional levels, guards, durable missions, cumulative hardening and evidence-based improvement.",
   "license": "MIT",
   "type": "module",
+  "files": [
+    "install.mjs",
+    "harness/",
+    "docs/",
+    "user-level/"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -13,5 +19,13 @@
   },
   "devDependencies": {
     "vitest": "^4.1.11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/looties-io/looties-harness.git"
+  },
+  "homepage": "https://github.com/looties-io/looties-harness#readme",
+  "bugs": {
+    "url": "https://github.com/looties-io/looties-harness/issues"
   }
 }
